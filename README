@@ -33,3 +33,12 @@ luser!^awesomeuser@127.0.0.1 if he identified as "awesomeuser"). This allows
 anyone's bot to easily authenticate a user without the need of keeping its own
 method of authentication, such as requiring someone to send a password to the
 bot upon joining the channel.
+
+
+Installation:
+
+0) Have Python (tested on 2.7.3)
+1) cp etc/config.py.example etc/config.py and edit that
+2) ./run
+3) sv should now be on your IRC network! /msg it for help and it will give you a
+   list and summary of commands.
