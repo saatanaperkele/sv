@@ -1,0 +1,23 @@
+if __name__ == '__main__':
+	print "Start sv.py, not this!"
+	exit(1)
+
+# edit below here
+
+sv_host = "services.sv"
+server_info = "badly configured services"
+uplink = ("localhost", 6667)
+send_password = "ayyyyyyyyyy"
+recv_password = "yoooooooooo"
+
+sv_nick = "sv"
+sv_ident = "bot"
+sv_vhost = "services.sv"
+sv_gecos = "IRC services"
+sv_modes = "+oB"
+
+log_channel = "#network"
+db_file = "etc/sv.db"
+
+admin_user = "boss"
+admin_pass = "suuuuuuup"

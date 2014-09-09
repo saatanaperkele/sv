@@ -1,0 +1,699 @@
+#!/usr/bin/python
+# Copyright (c) 2014, wowaname
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+# 
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer. 
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# 
+# The views and conclusions contained in the software and documentation are
+# those of the authors and should not be interpreted as representing official
+# policies, either expressed or implied, of the FreeBSD Project.
+
+import hashlib
+import os
+import re
+import socket
+import sys
+from getopt import getopt, GetoptError
+from time import time
+#from lib import db
+from etc.config import *
+
+servers, channels, users, ids = {}, {}, {}, {}
+vhosts = []
+buffer = ""
+verbosity, logfile, daemonize, varfile = 0, None, True, False
+
+try:
+	options, args = getopt(sys.argv[1:], "dhl:n")
+except GetoptError as e:
+	print e
+	sys.exit(2)
+
+for option, arg in options:
+	if option == "-d":
+		verbosity = 1
+	if option == "-h":
+		print "sv IRC services\n"
+		print "\t./sv.py -d -h -l logfile -n\n"
+		print "\t-d\tdebug to stdout"
+		print "\t-h\tthis help"
+		print "\t-l\tdebug to logfile"
+		print "\t-n\tdon't start as daemon"
+		sys.exit(0)
+	if option == "-l":
+		logfile = arg
+	if option == "-n":
+		daemonize = False
+
+
+class ID ():
+	def __init__ (self, username, password_hash, is_admin = 0,
+	 notice = True, vhost = None):
+		assert username not in ids
+		self.username = username
+		self.password = password_hash
+		self.permissions = is_admin
+		self.notice = notice
+		self.vhost = vhost
+		debug_line("ID %s created with password %s and permissions %d" %
+		 (username, password_hash, is_admin))
+
+	def change_password (self, password):
+		self.password = hashlib.sha512(password).hexdigest()
+
+
+class User ():
+	def __init__ (self, nick, ident, host, server):
+		assert nick not in users
+		self.nick = nick
+		self.ident = ident
+		self.host = host
+		self.server = server
+		self.channels = {}
+		self.id = None
+		self.cloakhost = None
+		debug_line("User %s created on %s" % (nick, server))
+
+	def toggle_vhost (self, switch):
+		if switch:
+			debug_line("%s now has vhost %s" % (self.nick, host))
+			send_line(":%s METADATA %s cloakhost :%s" %
+			 (sv_host, self.nick, self.id.vhost))
+			send_line(":%s MODE %s +x" % (sv_host, self.nick))
+		else:
+			debug_line("restoring host for %s" % (self.nick))
+			send_line(":%s METADATA %s cloakhost :%s" %
+			 (sv_host, self.nick,
+			  self.cloakhost if self.cloakhost else self.host))
+
+	def set_cloakhost (self, host, send = True):
+		debug_line("%s now has cloakhost %s" % (nick, host))
+		self.cloakhost = host
+		if send:
+			send_line(":%s METADATA %s cloakhost :%s" %
+			 (sv_host, self.nick, ident))
+
+	def set_ident (self, ident, send = True):
+		debug_line("%s now has ident %s" % (nick, ident))
+		if send:
+			send_line(":%s METADATA %s user :%s" % (sv_host, self.nick, ident))
+
+	#def set_gecos (self, gecos):
+	#	self.gecos = gecos
+
+	def set_id (self, id, send = True):
+		self.id = ids[id]
+		self.set_ident("^" + id)
+		if send:
+			send_line(":%s METADATA %s accountname :%s" %
+			 (sv_host, self.nick, id))
+		return id
+
+	def get_id_variable (self, variable):
+		if self.id == None: return None
+
+		if variable == "username": return self.id.username
+		if variable == "permissions": return self.id.permissions
+		if variable == "notice": return self.id.notice
+		if variable == "vhost": return self.id.vhost
+		raise SyntaxError("get_id_variable() used incorrectly, variable %s does not exist" % variable)
+	
+	def set_id_variable (self, variable, value):
+		assert self.id != None
+
+		if variable == "username": self.id.username = value
+		elif variable == "permissions": self.id.permissions = value
+		elif variable == "notice": self.id.notice = value
+		elif variable == "vhost": self.id.vhost = value
+		else:
+			raise SyntaxError("set_id_variable() used incorrectly, variable %s does not exist" % variable)
+		return value
+
+	def join_channel (self, channel):
+		assert channel.name not in self.channels
+		self.channels[channel.name] = channel
+
+	def part_channel (self, channel):
+		if channel.name in self.channels:
+			del self.channels[channel.name]
+
+	def logout (self):
+		self.id = None
+		self.toggle_vhost(False)
+		self.set_ident(self.ident)
+
+	def __del__ (self):
+		for channel in self.channels.keys():
+			channels[channel].remove_user(self)
+
+			if not channels[channel].users:
+				del channels[channel]
+
+		debug_line("User %s removed" % self.nick)
+
+
+class Channel ():
+	def __init__ (self, name):
+		assert name not in channels
+		self.users = []
+		self.name = name
+		self.type = name[0]
+		debug_line("Channel %s created" % self.name)
+
+	def add_user (self, user):
+		assert user.nick not in self.users
+		self.users.append(user.nick)
+		user.join_channel(self)
+		debug_line("User %s added to channel %s" % (user.nick, self.name))
+
+	def remove_user (self, user):
+		if user.nick in self.users:
+			self.users.remove(user.nick)
+			user.part_channel(self)
+			debug_line("User %s removed from channel %s" % (user.nick,
+			 self.name))
+			return 0
+		return 1
+
+	def __del__ (self):
+		debug_line("Channel %s removed" % self.name)
+
+
+class Server ():
+	def __init__ (self, name, id):
+		assert name not in servers
+		self.name = name
+		self.id = int(id)
+
+		debug_line("Server %s (#%d) created" % (name, self.id))
+
+	def __del__ (self):
+		for user in users.keys():
+			if users[user].server == self.name:
+				del users[user]
+
+		debug_line("Server %s removed" % self.name)
+
+
+def icompare (one, two):
+	if type(two) == list:
+		return one.lower in [i.lower for i in two]
+	else:
+		return one.lower() == two.lower()
+
+
+def parse_msg (message):
+	if type(message) == str:
+		if message[0] == ":":
+			return message[1:]
+		return message
+	if message[0][0] == ":":
+		message[0] = message[0][1:]
+	if len(message) == 1:
+		return message[0]
+	return " ".join(message)
+
+
+def get_nick (sender):
+	debug_line(re.match('(.*)!(.*)@(.*)', sender).groups())
+	return re.match('(.*)!(.*)@(.*)', sender).groups()
+
+
+def find_server (id):
+	for server in servers.itervalues():
+		if server.id == int(id):
+			return server.name
+
+
+def debug_prnt (line):
+	if verbosity >= 1:
+		print line
+
+	if logfile:
+		print >> file(logfile, "a"), line
+
+
+def load_db (file):
+	try:
+		debug_line("Opening database <%s> for reading" % file)
+		timer = time()
+
+		for line in open(file):
+			arg = line.split()
+
+			if arg[0] == "ID" and len(arg) == 6:
+				ids[arg[1]] = ID(arg[1], (arg[2], arg[3]), int(arg[4]),
+				 False if arg[5] == "P" else True)
+			elif arg[0] == "H" and len(arg) == 2:
+				vhosts.append(arg[1])
+			else:
+				debug_line("Line in <%s> cannot be parsed, skipped" % (file))
+
+		debug_line("Database <%s> parsed in %f seconds" %
+		 (file, time() - timer))
+
+	except IOError:
+		debug_line("Database <%s> cannot be opened for writing" % file)
+
+
+def save_db (file):
+	try:
+		debug_line("Opening database <%s> for writing" % file)
+		timer = time()
+
+		with open(file, "w") as fh:
+			for id in ids.itervalues():
+				fh.write("ID %s %s %s %d %c\n" % (id.username, id.password[0],
+				 id.password[1], id.permissions,
+				 "N" if id.notice else "P"))
+			for vhost in vhosts:
+				fh.write("H %s\n" % vhost)
+
+		debug_line("Database <%s> written in %f seconds" %
+		 (file, time() - timer))
+
+	except IOError:
+		debug_line("Database <%s> cannot be opened for writing" % file)
+
+
+def err_line (line):
+	debug_prnt("\x1B[33m-!-\x1B[0m %s" % line)
+
+def debug_line (line):
+	pass
+	debug_prnt("\x1B[34m---\x1B[0m %s" % str(line))
+
+def send_line (line):
+	debug_prnt("\x1B[31m<--\x1B[0m %s" % line)
+	return sock.send("%s\r\n" % line)
+
+def get_line (line):
+	debug_prnt("\x1B[32m-->\x1B[0m %s" % line)
+
+
+def notice (nick, message = ""):
+	send_line(":%s %s %s :%s" % (sv_nick,
+	 "PRIVMSG" if users[nick].get_id_variable("notice") == False else "NOTICE",
+	 nick, message))
+
+
+def set_password (password):
+	salt = os.urandom(16).encode("base64")[:-1]
+	hashed_password = hashlib.sha512(salt + password).hexdigest()
+	return (hashed_password, salt)
+
+
+def check_password (input, salted_password):
+	salt = salted_password[1]
+	hashed_input = hashlib.sha512(salt + input).hexdigest()
+	return hashed_input == salted_password[0]
+
+
+def logoff (reason, code = 0):
+	send_line(":%s QUIT :%s" % (sv_nick, reason))
+	save_db(db_file)
+	exit(code)
+
+
+def time_diff (then, now = time(), output_format = None):
+	difference = now - then
+	if output_format == "seconds": return difference
+	if output_format == "minutes": return difference/60
+	if output_format == "hours": return difference/3600
+	if output_format == "days": return difference/86400
+	if output_format == "weeks": return difference/604800
+	if difference < 60 or output_format == "seconds":
+		return "%d seconds" % difference
+	if difference < 3600 or output_format == "minutes":
+		return "%d minutes" % difference/60
+	if difference < 86400 or output_format == "hours":
+		return "%d hours" % difference/3600
+	if difference < 604800 or output_format == "days":
+		return "%d days" % difference/86400
+	return "%d weeks" % difference/604800
+	# anything past weeks requires knowledge of current month (could be anywhere
+	# from 28 to 31 days in a month) and year (leap or not) so let's not worry
+	# about that. we care about accuracy and besides, there's probably not going
+	# to be many year-old messages
+
+
+load_db(db_file)
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.connect(uplink)
+send_line("PASS %s 0210-IRC+ sv|3.1337:CMSX" % send_password)
+send_line("SERVER %s 1 :%s" % (sv_host, server_info))
+send_line(":%s KILL %s :Make way! Services are linking, and you have my nick." %
+ (sv_host, sv_nick))
+send_line(":%s SERVICE %s!%s@%s 1 * %s 1 :%s" % (sv_host, sv_nick, sv_ident,
+ sv_vhost, sv_modes, sv_gecos))
+send_line(":%s NJOIN %s :~%s" % (sv_host, log_channel, sv_nick))
+
+
+try:
+	while True:
+		buffer += sock.recv(512)
+		data = buffer.split("\r\n")
+		buffer = data.pop()
+
+		if not data:
+			logoff("Socket closed", 80)
+
+		for line in data:
+			get_line(line)
+			line = line.split()
+
+			if icompare(line[0], "PING"):
+				response = parse_msg(line[1:])
+				send_line(":%s PONG %s :%s" % (sv_host, response, response))
+
+			elif len(line) > 1:
+				if icompare(line[1], "JOIN"):
+					nick = line[0].lstrip(":")
+					channel = line[2].split("\x07")[0]
+
+					if not channel in channels:
+						channels[channel] = Channel(channel)
+
+						if users[nick].id:
+							send_line(":%s MODE %s +r %s" %
+							 (sv_host, channel, users[nick].ident[1:]))
+
+					channels[channel].add_user(users[nick])
+
+				elif icompare(line[1], "NJOIN"):
+					channel = line[2]
+					nicks = line[3].split(",")
+
+					if not channel in channels:
+						channels[channel] = Channel(channel)
+
+					for nick in nicks:
+						debug_line("adding %s to %s" % (nick, channel))
+						channels[channel].add_user(users[nick.lstrip(":!~&@%+-")])
+
+				elif icompare(line[1], "PART"):
+					nick = line[0].lstrip(":")
+					channel = line[2]
+					channels[channel].remove_user(users[nick])
+
+					if not channels[channel].users:
+						del channels[channel]
+
+				elif icompare(line[1], "QUIT"):
+					nick = line[0].lstrip(":")
+
+					del users[nick]
+
+				elif icompare(line[1], "SQUIT"):
+					del servers[line[2]]
+
+				elif icompare(line[1], "SERVER"):
+					origin = line[0].lstrip(":")
+					newserver = line[2]
+
+					servers[newserver] = Server(newserver,
+					 int(line[4]) if origin != newserver else 1)
+
+				elif icompare(line[1], "KILL"):
+					nick = line[2].split("!")[0]
+
+					if icompare(nick, sv_nick):
+						send_line(":%s SERVICE %s!%s@%s 1 * %s 1 :%s" %
+						 (sv_host, sv_nick, sv_ident,
+						  sv_vhost, sv_modes, sv_gecos))
+					else:
+						for channel in users[nick].channels.keys():
+							channels[channel].remove_user(users[nick])
+
+							if not channels[channel].users:
+								del channels[channel]
+
+							del users[nick]
+
+				elif icompare(line[1], "NICK"):
+					nick = line[2]
+
+					if len(line) == 3:
+						users[nick.lstrip(":")] = users.pop(line[0].lstrip(":"))
+					else:
+						server = find_server(line[6])
+						ident = line[4]
+						host = line[5]
+						users[nick] = User(nick, ident, host, server)
+
+				elif icompare(line[1], "SERVICE"):
+					server = find_server(line[3])
+					service = get_nick(line[2])
+					users[service[0]] = User(service[0], service[1], service[2],
+					 server)
+
+				elif icompare(line[1], "METADATA"):
+					nick = line[2]
+					parameter = parse_msg(line[4])
+					debug_line("Got METADATA %s" % " ".join(line[3:]))
+
+					if icompare(line[3], "accountname") and users[nick].id:
+						debug_line("Caught METADATA accountname asking %s to switch account name to %s. Ignoring" % (nick, parameter))
+						send_line(":%s NOTICE %s :Hey! I received a METADATA request to set accountname of \x02%s\x02 to \x02%s\x02. Am I conflicting with the demands of another services bot?" % (sv_nick, log_channel, nick, parameter))
+						send_line(":%s NOTICE %s :I'm setting our ID for \x02%s\x02 to None." % (sv_nick, log_channel, nick))
+						send_line(":%s NOTICE %s :Sorry %s, but I had to log you out from services due to server conflicts. Please contact an IRC operator to get this resolved." % (sv_nick, nick, nick))
+						users[nick].logout()
+
+					elif icompare(line[3], "certfp"):
+						pass
+
+					elif icompare(line[3], "cloakhost"):
+						users[nick].set_cloakhost(parse_msg(parameter), False)
+
+					elif icompare(line[3], "info"):
+						#debug_line("%s now has GECOS %s" % (nick, parameter))
+						#users[nick].set_gecos(parse_msg(parameter))
+						pass # we don't have a use for GECOS (yet); let the
+						     # servers handle it and we'll ignore it
+
+					elif icompare(line[3], "user"):
+						users[nick].set_ident(parse_msg(parameter), false)
+
+				elif icompare(line[1], "PRIVMSG"):
+					nick = parse_msg(line[0])
+					command = parse_msg(line[3])
+
+					if icompare(line[2], sv_nick):
+						# we're being queried
+						if icompare(command, "HELP"):
+							notice(nick, "\x02-= sv commands =-")
+							notice(nick)
+							notice(nick, "\x02HELP\x02:")
+							notice(nick, "    this help")
+							notice(nick, "\x02HOST\x02:")
+							notice(nick, "    vhost tools")
+							notice(nick, "      \x02REQUEST vhost\x02:")
+							notice(nick, "          request a vhost")
+							notice(nick, "      \x02LIST\x02:")
+							notice(nick, "          list available vhosts")
+							notice(nick, "      \x02TAKE vhost\x02:")
+							notice(nick, "          sets your vhost to one in LIST;")
+							notice(nick, "          argument can either be full vhost or index number")
+							notice(nick, "          (e.g. \x02TAKE my.special.vhost\x02 or \x02TAKE 2\x02)")
+							if users[nick].get_id_variable("permissions"):
+								notice(nick, "      \x02GIVE username vhost\x02:")
+								notice(nick, "          sets a user's vhost")
+								notice(nick, "      \x02OFFER vhost\x02:")
+								notice(nick, "          offer a vhost")
+							notice(nick, "      \x02ON\x02:")
+							notice(nick, "          activate your currently set vhost")
+							notice(nick, "      \x02OFF\x02:")
+							notice(nick, "          restore normal cloaking")
+							notice(nick, "\x02REGISTER username password contact\x02:")
+							notice(nick, "    registers a new username.")
+							notice(nick, "    \x02contact\x02 can be omitted, but should include something such as an")
+							notice(nick, "    E-mail address or PGP fingerprint to allow for password resets")
+							notice(nick, "\x02LOGIN username password\x02:")
+							notice(nick, "    (also \x02IDENTIFY\x02 and \x02ID\x02)")
+							notice(nick, "    identifies you to an existing username")
+							notice(nick, "\x02LOGOUT\x02:")
+							notice(nick, "    logs you out of your currently identified username")
+							notice(nick, "\x02MEMO\x02:")
+							notice(nick, "    memo tools")
+							notice(nick, "      \x02DELETE range\x02:")
+							notice(nick, "          deletes memos. range can be a single number (1), range (1-5),")
+							notice(nick, "          comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
+							notice(nick, "          \x02READ\x02 or \x02ALL\x02.")
+							notice(nick, "      \x02READ range\x02:")
+							notice(nick, "          recalls memos and marks as read. range can be a single number (1),")
+							notice(nick, "          range (1-5), comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
+							notice(nick, "          \x02UNREAD\x02 or \x02ALL\x02.")
+							notice(nick, "      \x02SEND username message\x02:")
+							notice(nick, "          sends a message to someone else registered with sv")
+							notice(nick, "\x02RESTORE username code new-password\x02:")
+							notice(nick, "    restores password for username.")
+							notice(nick, "    Please ask an operator for the password reset code before using this command.")
+							if users[nick].get_id_variable("permissions"):
+								notice(nick)
+								notice(nick, "\x02FREEZE username\x02:")
+								notice(nick, "    restricts username")
+								notice(nick, "\x02DROP username\x02:")
+								notice(nick, "    holds username from being used")
+								notice(nick, "\x02DROP username PERMANENT\x02:")
+								notice(nick, "    votes for username to be deleted from database, not just marked as dropped")
+								notice(nick, "\x02LIST\x02:")
+								notice(nick, "    lists registered usernames")
+								notice(nick, "\x02RESET password\x02:")
+								notice(nick, "    generates a code to give a user to reset their password")
+							notice(nick)
+							notice(nick, "\x02-= eof =-")
+
+						elif icompare(command, "HOST") and len(line) > 4:
+							if icompare(line[4], "GIVE") and len(line) > 6 and users[nick].get_id_variable("permissions") > 0:
+								users[line[5]].set_id_variable("vhost", line[6])
+								notice(nick, "vhost %s activated for %s" %
+								 (line[6], line[5]))
+
+							elif icompare(line[4], "LIST"):
+								if len(vhosts):
+									notice(nick, "\x02-= HOST LIST =-")
+									notice(nick)
+									for i, vhost in enumerate(vhosts):
+										notice(nick, "[\x02%d\x02] \x02%s\x02" %
+										 (i, vhost))
+									notice(nick)
+									notice(nick, "\x02-= eof =-")
+								else:
+									notice(nick, "No vhosts are being offered. \x02/msg %s HOST LIST\x02 to" % sv_nick)
+									notice(nick, "get a list of vhosts you can choose from, or \x02/msg %s HOST REQUEST host\x02" % sv_nick)
+									notice(nick, "to request one not on the list.")
+
+							elif icompare(line[4], "OFF"):
+								users[nick].toggle_vhost(False)
+
+							elif icompare(line[4], "OFFER") and users[nick].get_id_variable("permissions") > 0:
+								if line[5] in vhosts:
+									notice(nick, "vhost \x02%s\x02 is already being offered!")
+								else:
+									vhosts.append(line[5])
+									notice(nick, "vhost offered.")
+
+							elif icompare(line[4], "UNOFFER") and users[nick].get_id_variable("permissions") > 0:
+								if line[5] in vhosts:
+									vhosts.remove(line[5].lower())
+									notice(nick, "vhost removed.")
+								else:
+									notice(nick, "vhost \x02%s\x02 wasn't offered!" % line[5])
+
+							elif icompare(line[4], "ON"):
+								users[nick].toggle_vhost(True)
+
+							elif icompare(line[4], "REQUEST"):
+								pass
+
+							elif icompare(line[4], "TAKE"):
+								if users[nick].id == None:
+									notice(nick, "You are not identified.")
+								elif line[5].isdigit():
+									i = int(line[5])
+									if i < len(vhosts):
+										users[nick].set_id_variable("vhost",
+										 vhosts[i])
+										users[nick].toggle_vhost(True)
+										notice(nick, "Your vhost is now \x02%s\x02" % vhosts[i])
+									else:
+										notice(nick, "vhost #\x02%d\x02 is not being offered. \x02/msg %s HOST LIST\x02 to" % (i, sv_nick))
+										notice(nick, "get a list of vhosts you can choose from, or \x02/msg %s HOST REQUEST host\x02" % sv_nick)
+										notice(nick, "to request one not on the list.")
+								elif line[5] in vhosts:
+									users[nick].set_id_variable("vhost", line[5])
+									users[nick].toggle_vhost(True)
+									notice(nick, "Your vhost is now \x02%s\x02" % line[5])
+								else:
+									notice(nick, "vhost \x02%s\x02 is not being offered. \x02/msg %s HOST LIST\x02 to" % (line[5], sv_nick))
+									notice(nick, "get a list of vhosts you can choose from, or \x02/msg %s HOST REQUEST host\x02" % sv_nick)
+									notice(nick, "to request one not on the list.")
+
+							else:
+								notice(nick, "Unrecognised command for \x02HOST\x02. Accepted commands are \x02GIVE LIST OFF ON REQUEST TAKE\x02.")
+								notice(nick, "Please \x02/msg %s HELP\x02 for command help." % sv_nick)
+
+						elif icompare(command, "LOGOUT"):
+							users[nick].logout()
+							notice(nick, "Logged out. Your normal hostname and ident have been restored.")
+
+						elif icompare(command, "REGISTER") and len(line) > 5:
+							if line[4] == admin_user and line[5] != admin_pass:
+								notice(nick, "Account \x02%s\x02 reserved." % line[4])
+							elif line[4] in ids:
+								notice(nick, "Account \x02%s\x02 already exists." % line[4])
+							else:
+								ids[line[4]] = ID(line[4],
+								 set_password(line[5]), admin_user == line[4])
+								users[nick].set_id(line[4])
+								notice(nick, "Account \x02%s\x02 created." % line[4])
+
+						#elif icompare(command, ["IDENTIFY", "ID", "LOGIN"]) and len(line) > 5:
+						elif icompare(command, "LOGIN") and len(line) > 5:
+							if line[4] not in ids:
+								notice(nick, "Account \x02%s\x02 is not registered." % line[4])
+
+							elif users[nick].id != None:
+								notice(nick, "You are already identified for this username.")
+
+							elif check_password(line[5], ids[line[4]].password):
+								users[nick].set_id(line[4])
+								notice(nick, "Identified.")
+
+							else:
+								notice(nick, "Incorrect password.")
+
+						else:
+							notice(nick, "Unrecognised command or incorrect syntax. Please \x02/msg %s HELP\x02 for command help." % sv_nick)
+							
+					else:
+						# we're either getting fantasy commands or someone's
+						# talking in the logging channel
+						pass
+
+except KeyboardInterrupt:
+	logoff("Interrupted", 70)
+
+except AssertionError:
+	type, e, tb = sys.exc_info()
+	filename = tb.tb_frame.f_code.co_filename
+	lineno = tb.tb_lineno
+	print "AssertionError in %s, %d: %s" % (filename, lineno, e)
+	err_line("\x1B[1mAssertionError in %s, %d:\x1B[0m %s" %
+	 (filename, lineno, e))
+	logoff("Assertion error (bug)", 100)
+
+except SyntaxError:
+	type, e, tb = sys.exc_info()
+	filename = tb.tb_frame.f_code.co_filename
+	lineno = tb.tb_lineno
+	print "SyntaxError in %s, %d: %s" % (filename, lineno, e)
+	err_line("\x1B[1mSyntaxError in %s, %d:\x1B[0m %s" % (filename, lineno, e))
+	logoff("Syntax error (bug)", 100)
+
+except BaseException:
+	type, e, tb = sys.exc_info()
+	filename = tb.tb_frame.f_code.co_filename
+	lineno = tb.tb_lineno
+	print "%s error in %s, %d: %s" % (type, filename, lineno, e)
+	err_line("\x1B[1m%s error in %s, %d:\x1B[0m %s" %
+	 (type, filename, lineno, e))
+	logoff("Uncaught exception (bug)", 100)

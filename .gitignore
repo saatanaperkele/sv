@@ -1,0 +1,7 @@
+*.pyc
+/etc/config.py
+/etc/sv.db
+
+
+# too much effort to start making code neater
+/lib

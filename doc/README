@@ -1,0 +1,35 @@
+sv - dumb IRC services
+
+This IRC psuedoserver supplies only one bot (unlike Services for IRC Networks,
+Atheme, and Anope which all supply a suite of *Servs) which handles username
+registrations, memos, and vhosts. It also includes basic operator commands, such
+as the ability to send a global message (WALLOPS or NOTICE) without being an
+actual server operator.
+
+Since these services were made with https://github.com/wowaname/ngIRCd in mind
+before any other IRCd, some special features will not work on other IRCds
+without first modifying them. I will eventually make these features toggleable
+for those who don't want to use my spin of ngIRCd but still want to try out sv,
+but this is not a priority. I will also eventually add support for server-to-
+server protocols besides IRC+.
+
+Eventually sv will be modular, by supplying a UNIX file socket for other bots to
+connect to like a normal IRC server. These bots will be able to extend on sv's
+existing functionality and even allow sv to operate as a normal IRCd.
+
+Note that sv by default does not handle channel registrations. Instead, sv gives
+"founder" mode (+r on my ngIRCd) to the channel creator -- assuming the client
+is identified with sv. With this, as long as the channel is occupied, the
+founder can pop in and out and bypass bans, reclaim chanop status, and change
+channel topic and modes. The intent behind this is for people to use their own
+bots to manage channel access and auto-op, instead of relying on a ChanServ or
+BotServ to do all this. Plus, if sv ever happens to go offline, people with
+their own bots will not be affected, as they will still have +r/founder which
+the IRCd handles, so all functionality the founder has will not be lost.
+
+sv also does not do nickname registrations. Instead, upon identification it sets
+the user's ident to ^username (so luser!~luser@127.0.0.1 would become
+luser!^awesomeuser@127.0.0.1 if he identified as "awesomeuser"). This allows
+anyone's bot to easily authenticate a user without the need of keeping its own
+method of authentication, such as requiring someone to send a password to the
+bot upon joining the channel.

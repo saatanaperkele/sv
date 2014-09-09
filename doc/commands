@@ -1,0 +1,32 @@
+== user ==
+drop <password>
+login / identify / id <username> <password>
+register <username> <password> [contact]
+
+== vhost ==
+host on
+host off
+host request <vhost>
+host offer <vhost>
+host list / host ls
+host take <vhost>
+host give <username> <vhost>
+
+== memo ==
+memo send <username> <message>
+memo read {x-y,z|"all"|"unread"}
+memo delete {x-y,z|"all"|"read"}
+
+== set ==
+set notice [on|off]
+set contact [info]
+set password <password> <new password>
+set maxmemos [amount]
+set memofwd [e-mail]
+
+== oper ==
+drop <username> [permanent]
+freeze <username>
+list
+reset password <username>
+wall <message>
