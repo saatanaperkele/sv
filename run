@@ -1,16 +1,16 @@
 #!/usr/bin/python
 # Copyright (c) 2014, wowaname
 # All rights reserved.
-# 
+#
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
-# 
+#
 # 1. Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer. 
+#    list of conditions and the following disclaimer.
 # 2. Redistributions in binary form must reproduce the above copyright notice,
 #    this list of conditions and the following disclaimer in the documentation
 #    and/or other materials provided with the distribution.
-# 
+#
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
@@ -21,7 +21,7 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# 
+#
 # The views and conclusions contained in the software and documentation are
 # those of the authors and should not be interpreted as representing official
 # policies, either expressed or implied, of the FreeBSD Project.
@@ -33,6 +33,7 @@ import socket
 import sys
 from getopt import getopt, GetoptError
 from time import time, gmtime
+from binascii import crc32
 #from lib import db
 from etc.config import *
 
@@ -77,7 +78,7 @@ class Memo ():
 
 class ID ():
 	def __init__ (self, username, password_hash, is_admin = 0,
-	 notice = True, vhost = None):
+	 notice = True, vhost = None, memos_unread = 0):
 		assert username not in ids
 		self.username = username
 		self.password = password_hash
@@ -85,7 +86,8 @@ class ID ():
 		self.notice = notice
 		self.vhost = vhost
 		self.memos = []
-		self.memos_unread = 0
+		self.memos_unread = memos_unread
+		self.certfp = []
 		debug_line("ID %s created" % username)
 
 	def change_password (self, password):
@@ -127,7 +129,7 @@ class User ():
 		self.cloakhost = host
 		if send:
 			send_line(":%s METADATA %s cloakhost :%s" %
-			 (sv_host, self.nick, ident))
+			 (sv_host, self.nick, host))
 
 	def set_ident (self, ident, send = True):
 		debug_line("%s now has ident %s" % (nick, ident))
@@ -155,7 +157,7 @@ class User ():
 		if variable == "notice": return self.id.notice
 		if variable == "vhost": return self.id.vhost
 		raise SyntaxError("get_id_variable() used incorrectly, variable %s does not exist" % variable)
-	
+
 	def set_id_variable (self, variable, value):
 		assert self.id != None
 
@@ -253,14 +255,77 @@ def parse_msg (message):
 
 
 def get_nick (sender):
-	debug_line(re.match('(.*)!(.*)@(.*)', sender).groups())
-	return re.match('(.*)!(.*)@(.*)', sender).groups()
+	pattern = re.match(r"(.*)!(.*)@(.*)", sender).groups()
+	debug_line(pattern)
+	return pattern
 
 
 def find_server (id):
 	for server in servers.itervalues():
 		if server.id == int(id):
 			return server.name
+
+
+#*DNS			->	abcd.efgh.sld.tld/cloak
+#*IPv4			->	ab.cd.ef.gh.ip/cloak
+# IPv6			->	ab:cd:ef:gh:ij:kl/cloak
+# 
+# Server		->	no-ip/tor/lolikaastbgo5dtk.onion
+# IP on server	->	no-ip/tor/webchat
+# Server		->	i2p/abcdefgh
+# 
+# Offer			->	unaffiliated/user
+# Offer to +B	->	unaffiliated/bot/owner
+# sv			->	volatile/bot/sv
+# +o			->	volatile/staff/server/lolikaastbgo5dtk.onion
+# Helpop		->	volatile/staff/help
+#
+# For now I think this will mostly be hardcoded.
+# the H line in the database will probably have more attributes to account for
+# special users: +B, +o, specific servers
+def variable_cloak (user):
+	#################################################
+	# Block for things we shouldn't need to hardcode
+	if user.host == "127.0.0.1" and user.server == "UploadDownload.pw":
+		return "no-ip/tor/webchat"
+	elif user.server == "lolikaastbgo5dtk.onion":
+		return "no-ip/tor/lolikaastbgo5dtk.onion"
+	elif user.server == "koboijvbwowkcpj2.onion":
+		return "no-ip/tor/koboijvbwowkcpj2.onion"
+	# End block
+	#################################################
+
+	elif re.match(r"(?:[0-2]?[0-9]{1,2}\.){3}(?:[0-2]?[0-9]{1,2})", user.host) is not None:
+		# unresolved IP
+		mask = re.match(r"^([0-2]?[0-9]{1,2})\.([0-2]?[0-9]{1,2})\.([0-2]?[0-9]{1,2})\.([0-2]?[0-9]{1,2})$", user.host).groups()
+		out = ""
+		for i in xrange(4):
+			out += chr(crc32(mask[i] + str(i)) / 26 % 26 + 97)
+			out += chr(crc32(mask[i] + str(i)) % 26 + 97)
+			out += "."
+		return out + "ip/cloak"
+	elif re.match(r"^[-a-zA-Z0-9]*$", user.host) is not None:
+		out = ""
+		for i in hashlib.md5(user.host[0]).digest()[8:]:
+			out += chr(ord(i) % 26 + 97)
+		return out + "/cloak"
+	elif re.match(r"^[-a-zA-Z0-9]*\.[-a-zA-Z0-9]*$", user.host) is not None:
+		mask = re.match(r"([-a-zA-Z0-9])*\.([-a-zA-Z0-9])*", user.host).groups()
+		out = ""
+		for i in xrange(2):
+			for j in hashlib.md5(mask[i]).digest()[8:]:
+				out += chr(ord(j) % 26 + 97)
+			if i == 0:
+				out += "."
+		return out + "/cloak"
+	elif re.match(r"^(?:[-a-zA-Z0-9]*\.){2,}[-a-zA-Z0-9]*$", user.host) is not None:
+		mask = re.match(r"([-a-zA-Z0-9.])*((?:\.[-a-zA-Z0-9]*){2})", user.host).groups()
+		out = ""
+		for i in hashlib.md5(mask[0]).digest()[8:]:
+			out += chr(ord(i) % 26 + 97)
+		return out + mask[1] + "/cloak"
+	else:
+		pass
 
 
 def debug_prnt (line):
@@ -279,12 +344,12 @@ def load_db (file):
 		for line in open(file):
 			arg = line.split()
 
-			if arg[0] == "ID" and len(arg) == 7:
+			if arg[0] == "ID" and len(arg) == 8:
 				ids[arg[1]] = ID(arg[1], (arg[2], arg[3]), int(arg[4]),
-				 False if arg[5] == "P" else True, arg[6])
-			elif arg[0] == "ID" and len(arg) == 6:
+				 False if arg[6] == "P" else True, arg[7], int(arg[5]))
+			elif arg[0] == "ID" and len(arg) == 7:
 				ids[arg[1]] = ID(arg[1], (arg[2], arg[3]), int(arg[4]),
-				 False if arg[5] == "P" else True, None)
+				 False if arg[6] == "P" else True, None, int(arg[5]))
 			elif arg[0] == "H" and len(arg) == 2:
 				vhosts.append(arg[1])
 			elif arg[0] == "HR" and len(arg) == 3:
@@ -308,8 +373,8 @@ def save_db (file):
 
 		with open(file, "w") as fh:
 			for id in ids.itervalues():
-				fh.write("ID %s %s %s %d %c%s\n" % (id.username, id.password[0],
-				 id.password[1], id.permissions,
+				fh.write("ID %s %s %s %d %d %c%s\n" % (id.username, id.password[0],
+				 id.password[1], id.permissions, id.memos_unread,
 				 "N" if id.notice else "P",
 				 " " + id.vhost if id.vhost != None else ""))
 				for memo in id.memos:
@@ -418,7 +483,7 @@ try:
 
 			elif len(line) > 1:
 				if icompare(line[1], "JOIN"):
-					nick = line[0].lstrip(":")
+					nick = parse_msg(line[0])
 					channel = line[2].split("\x07")[0]
 
 					if not channel in channels:
@@ -442,7 +507,15 @@ try:
 						channels[channel].add_user(users[nick.lstrip(":!~&@%+-")])
 
 				elif icompare(line[1], "PART"):
-					nick = line[0].lstrip(":")
+					nick = parse_msg(line[0])
+					channel = line[2]
+					channels[channel].remove_user(users[nick])
+
+					if not channels[channel].users:
+						del channels[channel]
+
+				elif icompare(line[1], "KICK"):
+					nick = line[3]
 					channel = line[2]
 					channels[channel].remove_user(users[nick])
 
@@ -450,7 +523,7 @@ try:
 						del channels[channel]
 
 				elif icompare(line[1], "QUIT"):
-					nick = line[0].lstrip(":")
+					nick = parse_msg(line[0])
 
 					del users[nick]
 
@@ -458,38 +531,42 @@ try:
 					del servers[line[2]]
 
 				elif icompare(line[1], "SERVER"):
-					origin = line[0].lstrip(":")
+					origin = parse_msg(line[0])
 					newserver = line[2]
 
 					servers[newserver] = Server(newserver,
 					 int(line[4]) if origin != newserver else 1)
 
 				elif icompare(line[1], "KILL"):
-					nick = line[2].split("!")[0]
+					origin = parse_msg(line[0])
+					target = line[2]
 
 					if icompare(nick, sv_nick):
-						send_line(":%s SERVICE %s!%s@%s 1 * %s 1 :%s" %
-						 (sv_host, sv_nick, sv_ident,
-						  sv_vhost, sv_modes, sv_gecos))
-					else:
-						for channel in users[nick].channels.keys():
-							channels[channel].remove_user(users[nick])
+						pass
+#						send_line(":%s SERVICE %s!%s@%s 1 * %s 1 :%s" %
+#						 (sv_host, sv_nick, sv_ident,
+#						  sv_vhost, sv_modes, sv_gecos))
+					elif users[target].server != users[origin].server:
+						# local KILLs are followed by a QUIT
+						for channel in users[target].channels.keys():
+							channels[channel].remove_user(users[target])
 
 							if not channels[channel].users:
 								del channels[channel]
 
-							del users[nick]
+						del users[target]
 
 				elif icompare(line[1], "NICK"):
 					nick = line[2]
 
 					if len(line) == 3:
-						users[nick.lstrip(":")] = users.pop(line[0].lstrip(":"))
+						users[parse_msg(nick)] = users.pop(parse_msg(line[0]))
 					else:
 						server = find_server(line[6])
 						ident = line[4]
 						host = line[5]
 						users[nick] = User(nick, ident, host, server)
+						users[nick].set_cloakhost(variable_cloak(users[nick]))
 
 				elif icompare(line[1], "SERVICE"):
 					server = find_server(line[3])
@@ -530,93 +607,131 @@ try:
 
 					if icompare(line[2], sv_nick):
 						# we're being queried
-						if icompare(command, "GLOBAL") and users[nick].get_id_variable("permissions") > 0:
-							if len(line) == 4:
-								notice(nick, "Message must not be blank.")
+						if icompare(command, "GLOBAL"):
+							if users[nick].get_id_variable("permissions") > 0:
+								if len(line) == 4:
+									notice(nick, "Message must not be blank.")
+								else:
+									# parse_msg() will eat this if we don't do it
+									if line[4][0] == ":":
+										line[4] == ":" + line[4]
+									send_line(":%s WALLOPS :(\x02%s\x02) %s" % (sv_nick, parse_msg(line[0]), parse_msg(line[4:])))
 							else:
-								# parse_msg() will eat this if we don't do it
-								if line[4][0] == ":":
-									line[4] == ":" + line[4]
-								send_line(":%s WALLOPS :(\x02%s\x02) %s" % (sv_nick, line[0].lstrip(":"), parse_msg(line[4:])))
+								notice(nick, "Permission denied.")
 
 						elif icompare(command, "HELP"):
-							notice(nick, "\x02-= sv commands =-")
+							notice(nick, "\x02-= sv help =-")
 							notice(nick)
-							notice(nick, "\x02HELP\x02:")
-							notice(nick, "    this help")
-							notice(nick, "\x02HOST\x02:")
-							notice(nick, "    vhost tools")
-							notice(nick, "      \x02REQUEST vhost\x02:")
-							notice(nick, "          request a vhost")
-							notice(nick, "      \x02LIST\x02:")
-							notice(nick, "          list available vhosts")
-							notice(nick, "      \x02TAKE vhost\x02:")
-							notice(nick, "          sets your vhost to one in LIST;")
-							notice(nick, "          argument can either be full vhost or index number")
-							notice(nick, "          (e.g. \x02TAKE my.special.vhost\x02 or \x02TAKE 2\x02)")
-							if users[nick].get_id_variable("permissions"):
-								notice(nick, "      \x02GIVE username vhost\x02:")
-								notice(nick, "          sets a user's vhost")
-								notice(nick, "      \x02OFFER vhost\x02:")
-								notice(nick, "          offer a vhost")
-								notice(nick, "      \x02ACCEPT username\x02")
-								notice(nick, "          accept user's vhost request")
-								notice(nick, "      \x02DENY username\x02")
-								notice(nick, "          deny user's vhost request")
-							notice(nick, "      \x02ON\x02:")
-							notice(nick, "          activate your currently set vhost")
-							notice(nick, "      \x02OFF\x02:")
-							notice(nick, "          restore normal cloaking")
-							notice(nick, "\x02REGISTER username password contact\x02:")
-							notice(nick, "    registers a new username.")
-							notice(nick, "    \x02contact\x02 can be omitted, but should include something such as an")
-							notice(nick, "    E-mail address or PGP fingerprint to allow for password resets")
-							notice(nick, "\x02LOGIN username password\x02:")
-							notice(nick, "    (also \x02IDENTIFY\x02 and \x02ID\x02)")
-							notice(nick, "    identifies you to an existing username")
-							notice(nick, "\x02LOGOUT\x02:")
-							notice(nick, "    logs you out of your currently identified username")
-							notice(nick, "\x02MEMO\x02:")
-							notice(nick, "    memo tools")
-							notice(nick, "      \x02DELETE range\x02:")
-							notice(nick, "          deletes memos. range can be a single number (1), range (1-5),")
-							notice(nick, "          comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
-							notice(nick, "          \x02READ\x02 or \x02ALL\x02.")
-							notice(nick, "      \x02READ range\x02:")
-							notice(nick, "          recalls memos and marks as read. range can be a single number (1),")
-							notice(nick, "          range (1-5), comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
-							notice(nick, "          \x02UNREAD\x02 or \x02ALL\x02.")
-							notice(nick, "      \x02SEND username message\x02:")
-							notice(nick, "          sends a message to someone else registered with sv")
-							notice(nick, "\x02RESTORE username code new-password\x02:")
-							notice(nick, "    restores password for username.")
-							notice(nick, "    Please ask an operator for the password reset code before using this command.")
-							if users[nick].get_id_variable("permissions"):
-								notice(nick)
-								notice(nick, "\x02GLOBAL message\x02:")
-								notice(nick, "    sends a WALLOPS")
-								notice(nick, "\x02FREEZE username\x02:")
-								notice(nick, "    restricts username")
-								notice(nick, "\x02DROP username\x02:")
-								notice(nick, "    holds username from being used")
-								notice(nick, "\x02DROP username PERMANENT\x02:")
-								notice(nick, "    votes for username to be deleted from database, not just marked as dropped")
-								notice(nick, "\x02LIST\x02:")
-								notice(nick, "    lists registered usernames")
-								notice(nick, "\x02RESET password\x02:")
-								notice(nick, "    generates a code to give a user to reset their password")
+
+							if len(line) > 4:
+								if icompare(line[4], "HELP"):
+									notice(nick, "\x02HELP\x02:")
+									notice(nick, "    used for obtaining a list of %s's features or describing certain" % sv_nick)
+									notice(nick, "    commands and features")
+								elif icompare(line[4], "HOST"):
+									notice(nick, "\x02HOST REQUEST vhost\x02:")
+									notice(nick, "    request a vhost")
+									notice(nick, "\x02HOST LIST\x02:")
+									notice(nick, "    list available vhosts")
+									notice(nick, "\x02HOST TAKE vhost\x02:")
+									notice(nick, "    sets your vhost to one in LIST;")
+									notice(nick, "    argument can either be full vhost or index number")
+									notice(nick, "    (e.g. \x02TAKE my.special.vhost\x02 or \x02TAKE 2\x02)")
+									if users[nick].get_id_variable("permissions"):
+										notice(nick, "\x02HOST GIVE username vhost\x02:")
+										notice(nick, "    sets a user's vhost")
+										notice(nick, "\x02HOST OFFER vhost\x02:")
+										notice(nick, "    offer a vhost")
+										notice(nick, "\x02HOST ACCEPT username\x02")
+										notice(nick, "    accept user's vhost request")
+										notice(nick, "\x02HOST DENY username\x02")
+										notice(nick, "    deny user's vhost request")
+									notice(nick, "\x02HOST ON\x02:")
+									notice(nick, "    activate your currently set vhost")
+									notice(nick, "\x02HOST OFF\x02:")
+									notice(nick, "    restore normal cloaking")
+								elif icompare(line[4], "REGISTER"):
+									notice(nick, "\x02REGISTER username password\x02:")
+									notice(nick, "    registers an account with services under your chosen name and")
+									notice(nick, "    secured with a password of your choice. Having a services account")
+									notice(nick, "    enables you to take advantage of various features offered by services.")
+								elif icompare(line[4], "LOGIN"):
+									notice(nick, "\x02LOGIN username password\x02:")
+									notice(nick, "    identifies you with an existing services account.")
+									notice(nick, "    If you do not have an account, please see the REGISTER command")
+								elif icompare(line[4], "MEMO"):
+									notice(nick, "\x02MEMO DELETE range\x02:")
+									notice(nick, "    deletes memos. range can be a single number (1), range (1-5),")
+									notice(nick, "    comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
+									notice(nick, "    \x02READ\x02 or \x02ALL\x02.")
+									notice(nick, "\x02MEMO READ range\x02:")
+									notice(nick, "    recalls memos and marks as read. range can be a single number (1),")
+									notice(nick, "    range (1-5), comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
+									notice(nick, "    \x02UNREAD\x02 or \x02ALL\x02.")
+									notice(nick, "\x02MEMO SEND username message\x02:")
+									notice(nick, "    sends a message to someone else registered with sv")
+								elif icompare(line[4], "RESTORE"):
+									notice(nick, "\x02RESTORE username code new-password\x02:")
+									notice(nick, "    if you have forgotten your password, you can request a code")
+									notice(nick, "    be sent to you in order to use this command to create a new")
+									notice(nick, "    password for your account.")
+								else:
+									notice(nick, "\x02%s\x02 is not a command or topic covered by the help system." % line[4])
+									notice(nick, "Use \x02/msg %s HELP\x02 for a list of help topics, or" % sv_nick)
+									notice(nick, "contact a help operator on the network.")
+
+							else:
+								notice(nick, "\x02HELP\x02:")
+								notice(nick, "    this help")
+								notice(nick, "\x02HOST\x02:")
+								notice(nick, "    vhost tools (\x02/msg %s HELP HOST\x02 for subcommands)" % sv_nick)
+								notice(nick, "\x02REGISTER username password\x02:")
+								notice(nick, "    registers a new username.")
+								notice(nick, "\x02LOGIN username password\x02:")
+								#notice(nick, "    (also \x02IDENTIFY\x02 and \x02ID\x02)")
+								notice(nick, "    identifies you to an existing username")
+								notice(nick, "\x02LOGOUT\x02:")
+								notice(nick, "    logs you out of your currently identified username")
+								notice(nick, "\x02MEMO\x02:")
+								notice(nick, "    memo tools (\x02/msg %s HELP MEMO\x02 for subcommands)" % sv_nick)
+								notice(nick, "\x02RESTORE username code new-password\x02:")
+								notice(nick, "    restores password for username.")
+								notice(nick, "    Please ask an operator for the password reset code before using this command.")
+								if users[nick].get_id_variable("permissions"):
+									notice(nick)
+									notice(nick, "\x02GLOBAL message\x02:")
+									notice(nick, "    sends a WALLOPS")
+									notice(nick, "\x02FREEZE username\x02:")
+									notice(nick, "    restricts username")
+									notice(nick, "\x02DROP username\x02:")
+									notice(nick, "    holds username from being used")
+									notice(nick, "\x02DROP username PERMANENT\x02:")
+									notice(nick, "    votes for username to be deleted from database, not just marked as dropped")
+									notice(nick, "\x02LIST\x02:")
+									notice(nick, "    lists registered usernames")
+									notice(nick, "\x02RESET password\x02:")
+									notice(nick, "    generates a code to give a user to reset their password")
+
 							notice(nick)
+							notice(nick, "For additional information on a certain command or topic,")
+							notice(nick, "use \x02/msg %s HELP command" % sv_nick)
 							notice(nick, "\x02-= eof =-")
 
 						elif icompare(command, "HOST"):
 							if len(line) < 5:
-								notice(nick, "Unrecognised command for \x02HOST\x02. Accepted commands are \x02GIVE LIST OFF ON REQUEST TAKE\x02.")
+								notice(nick, "Unrecognised command for \x02HOST\x02. Accepted commands are")
+								notice(nick, "\x02GIVE LIST OFF ON REQUEST TAKE\x02.")
 								notice(nick, "Please \x02/msg %s HELP\x02 for command help." % sv_nick)
 
-							elif icompare(line[4], "GIVE") and len(line) > 6 and users[nick].get_id_variable("permissions") > 0:
-								users[line[5]].set_id_variable("vhost", line[6])
-								notice(nick, "vhost %s activated for %s" %
-								 (line[6], line[5]))
+							elif icompare(line[4], "GIVE"):
+								if users[nick].get_id_variable("permissions") > 0:
+									if line[5] in ids:
+										ids[line[5]].vhost = line[6]
+										notice(nick, "vhost \x02%s\x02 activated for \x02%s" % (line[6], line[5]))
+									else:
+										notice(nick, "\x02%s\x02 is not registered!" % line[5])
+								else:
+									notice(nick, "Permission denied.")
 
 							elif icompare(line[4], "LIST"):
 								if len(vhosts):
@@ -636,26 +751,32 @@ try:
 								users[nick].toggle_vhost(False)
 								notice(nick, "Normal hostname restored.")
 
-							elif icompare(line[4], "OFFER") and users[nick].get_id_variable("permissions") > 0:
-								if line[5] in vhosts:
-									notice(nick, "vhost \x02%s\x02 is already being offered!")
+							elif icompare(line[4], "OFFER"):
+								if users[nick].get_id_variable("permissions") > 0:
+									if line[5] in vhosts:
+										notice(nick, "vhost \x02%s\x02 is already being offered!")
+									else:
+										vhosts.append(line[5])
+										notice(nick, "vhost offered.")
 								else:
-									vhosts.append(line[5])
-									notice(nick, "vhost offered.")
+									notice(nick, "Permission denied.")
 
-							elif icompare(line[4], "UNOFFER") and users[nick].get_id_variable("permissions") > 0:
-								if line[5].isdigit():
-									i = int(line[5])
-									if i < len(vhosts):
-										del vhosts[int(line[5])]
+							elif icompare(line[4], "UNOFFER"):
+								if users[nick].get_id_variable("permissions") > 0:
+									if line[5].isdigit():
+										i = int(line[5])
+										if i < len(vhosts):
+											del vhosts[int(line[5])]
+											notice(nick, "vhost removed.")
+										else:
+											notice(nick, "vhost #\x02%d\x02 wasn't offered!" % i)
+									elif line[5] in vhosts:
+										vhosts.remove(line[5].lower())
 										notice(nick, "vhost removed.")
 									else:
-										notice(nick, "vhost #\x02%d\x02 wasn't offered!" % i)
-								elif line[5] in vhosts:
-									vhosts.remove(line[5].lower())
-									notice(nick, "vhost removed.")
+										notice(nick, "vhost \x02%s\x02 wasn't offered!" % line[5])
 								else:
-									notice(nick, "vhost \x02%s\x02 wasn't offered!" % line[5])
+									notice(nick, "Permission denied.")
 
 							elif icompare(line[4], "ON"):
 								users[nick].toggle_vhost(True)
@@ -669,14 +790,17 @@ try:
 								else:
 									notice(nick, "You are not identified.")
 
-							elif icompare(line[4], "ACCEPT") and users[nick].get_id_variable("permissions") > 0:
-								if line[5] in vrequests:
-									ids[line[5]].vhost = vrequests[line[5]]
-									notice(nick, "vhost request accepted.")
-									ids[line[5]].add_memo(Memo(line[0].lstrip(":"), time(),
-									 "Your vhost of \x02%s\x02 was accepted, and will take effect immediately."))
+							elif icompare(line[4], "ACCEPT"):
+								if users[nick].get_id_variable("permissions") > 0:
+									if line[5] in vrequests:
+										ids[line[5]].vhost = vrequests[line[5]]
+										notice(nick, "vhost request accepted.")
+										ids[line[5]].add_memo(Memo(parse_msg(line[0]), time(),
+										 "Your vhost of \x02%s\x02 was accepted, and will take effect immediately."))
+									else:
+										notice(nick, "\x02%s\x02 did not request a vhost.")
 								else:
-									notice(nick, "\x02%s\x02 did not request a vhost.")
+									notice(nick, "Permission denied.")
 
 							elif icompare(line[4], "TAKE"):
 								if users[nick].id == None:
@@ -701,55 +825,70 @@ try:
 									notice(nick, "to request one not on the list.")
 
 							else:
-								notice(nick, "Unrecognised command for \x02HOST\x02. Accepted commands are \x02GIVE LIST OFF ON REQUEST TAKE\x02.")
-								notice(nick, "Please \x02/msg %s HELP\x02 for command help." % sv_nick)
+								notice(nick, "Unrecognised command for \x02HOST\x02. Accepted commands are")
+								notice(nick, "\x02GIVE LIST OFF ON REQUEST TAKE\x02.")
+								notice(nick, "Please \x02/msg %s HELP HOST\x02 for command help." % sv_nick)
 
 						elif icompare(command, "LOGOUT"):
-							users[nick].logout()
-							notice(nick, "Logged out. Your normal hostname and ident have been restored.")
-
-						elif icompare(command, "REGISTER") and len(line) > 5:
-							if line[4] == admin_user and line[5] != admin_pass:
-								notice(nick, "Account \x02%s\x02 reserved." % line[4])
-							elif line[4] in ids:
-								notice(nick, "Account \x02%s\x02 already exists." % line[4])
+							if users[nick].id == None:
+								notice(nick, "You are not identified.")
 							else:
-								ids[line[4]] = ID(line[4],
-								 set_password(line[5]), admin_user == line[4])
-								users[nick].set_id(line[4])
-								notice(nick, "Account \x02%s\x02 created." % line[4])
+								users[nick].logout()
+								notice(nick, "Logged out. Your normal hostname and ident have been restored.")
+
+						elif icompare(command, "REGISTER"):
+							if len(line) > 5:
+								if line[4] == admin_user and line[5] != admin_pass:
+									notice(nick, "Account \x02%s\x02 reserved." % line[4])
+								elif line[4] in ids:
+									notice(nick, "Account \x02%s\x02 already exists." % line[4])
+								else:
+									ids[line[4]] = ID(line[4],
+									 set_password(line[5]), admin_user == line[4])
+									users[nick].set_id(line[4])
+									notice(nick, "Account \x02%s\x02 created." % line[4])
+							else:
+								notice(nick, "Insufficient parameters for \x02REGISTER\x02. Please")
+								notice(nick, "\x02/msg %s REGISTER username password\x02 where \x02username\x02 and")
+								notice(nick, "\x02password\x02 are replaced with your desired username and password." % sv_nick)
 
 						#elif icompare(command, ["IDENTIFY", "ID", "LOGIN"]) and len(line) > 5:
-						elif icompare(command, "LOGIN") and len(line) > 5:
-							if line[4] not in ids:
-								notice(nick, "Account \x02%s\x02 is not registered." % line[4])
-							elif users[nick].id != None:
-								notice(nick, "You are already identified for this username.")
-							elif check_password(line[5], ids[line[4]].password):
-								users[nick].set_id(line[4])
-								notice(nick, "Identified.")
-								if ids[line[4]].memos_unread:
-									notice(nick, "You have %d unread memos." % ids[line[4]].memos_unread)
-							else:
-								notice(nick, "Incorrect password.")
-
-						elif icompare(command, "SET") and len(line) > 4:
-							if icompare(line[4], "NOTICE"):
-								if len(line) == 6:
-									if icompare(line[5], "ON"):
-										users[nick].set_id_variable("notice", True)
-										notice(nick, "I will now NOTICE you.")
-									elif icompare(line[5], "OFF"):
-										users[nick].set_id_variable("notice", False)
-										notice(nick, "I will now PRIVMSG you.")
-									else:
-										notice(nick, "Syntax is \x02SET NOTICE on/off")
+						elif icompare(command, "LOGIN"):
+							if len(line) > 5:
+								if line[4] not in ids:
+									notice(nick, "Account \x02%s\x02 is not registered." % line[4])
+								elif users[nick].id != None:
+									notice(nick, "You are already identified for this username.")
+								elif check_password(line[5], ids[line[4]].password):
+									users[nick].set_id(line[4])
+									notice(nick, "Identified.")
+									if ids[line[4]].memos_unread:
+										notice(nick, "You have %d unread memos." % ids[line[4]].memos_unread)
 								else:
-									notice(nick, "Current NOTICE setting: %s" %
-									 "on (NOTICE)" if users[nick].get_id_variable("notice") else "off (PRIVMSG)")
-										
+									notice(nick, "Incorrect password.")
+							else:
+								notice(nick, "Insufficient parameters for \x02LOGIN\x02. Please")
+								notice(nick, "\x02/msg %s LOGIN username password\x02 where \x02username\x02 and")
+								notice(nick, "\x02password\x02 are replaced with the username and password you used to register." % sv_nick)
+
+						elif icompare(command, "SET"):
+							if len(line) > 4:
+								if icompare(line[4], "NOTICE"):
+									if len(line) == 6:
+										if icompare(line[5], "ON"):
+											users[nick].set_id_variable("notice", True)
+											notice(nick, "I will now NOTICE you.")
+										elif icompare(line[5], "OFF"):
+											users[nick].set_id_variable("notice", False)
+											notice(nick, "I will now PRIVMSG you.")
+										else:
+											notice(nick, "Syntax is \x02SET NOTICE on/off")
+									else:
+										notice(nick, "Current NOTICE setting: %s" %
+										 "on (NOTICE)" if users[nick].get_id_variable("notice") else "off (PRIVMSG)")
+
 							elif icompare(line[4], "CONTACT"):
-								pass
+								notice(nick, "TODO")
 							elif icompare(line[4], "PASSWORD"):
 								if len(line) == 7:
 									if check_password(line[5], users[nick].id.password):
@@ -760,16 +899,17 @@ try:
 								else:
 									notice(nick, "Syntax is \x02SET PASSWORD old new")
 							elif icompare(line[4], "MAXMEMOS"):
-								pass
+								notice(nick, "TODO")
 							elif icompare(line[4], "MEMOFWD"):
-								pass
+								notice(nick, "TODO")
 							else:
-								notice(nick, "Unrecognised command for \x02SET\x02. Accepted commands are \x02NOTICE CONTACT PASSWORD MAXMEMOS MEMOFWD\x02.")
-								notice(nick, "Please \x02/msg %s HELP\x02 for command help." % sv_nick)
+								notice(nick, "Unrecognised command for \x02SET\x02. Accepted commands are")
+								notice(nick, "\x02NOTICE CONTACT PASSWORD MAXMEMOS MEMOFWD\x02.")
+								notice(nick, "Please \x02/msg %s HELP SET\x02 for command help." % sv_nick)
 
 						else:
 							notice(nick, "Unrecognised command or incorrect syntax. Please \x02/msg %s HELP\x02 for command help." % sv_nick)
-							
+
 					else:
 						# we're either getting fantasy commands or someone's
 						# talking in the logging channel

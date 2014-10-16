@@ -24,6 +24,14 @@ set password <password> <new password>
 set maxmemos [amount]
 set memofwd [e-mail]
 
+== allow ==
+allow add host <hostmask>
+allow add certfp [fingerprint]
+allow add otrfp [fingerprint]
+allow del <host|certfp|otrfp> <index>
+allow list [host|certfp|otrfp]
+allow plain [on|off]
+
 == oper ==
 drop <username> [permanent]
 freeze <username>
