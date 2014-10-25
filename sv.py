@@ -301,7 +301,7 @@ def variable_cloak (user):
   #
   #################################################
 
-	elif re.match(r"(?:[0-2]?[0-9]{1,2}\.){3}(?:[0-2]?[0-9]{1,2})", user.host) is not None:
+	elif re.match(r"^(?:[0-2]?[0-9]{1,2}\.){3}(?:[0-2]?[0-9]{1,2})$", user.host) is not None:
 		# unresolved IP
 		mask = re.match(r"^([0-2]?[0-9]{1,2})\.([0-2]?[0-9]{1,2})\.([0-2]?[0-9]{1,2})\.([0-2]?[0-9]{1,2})$", user.host).groups()
 		out = ""
