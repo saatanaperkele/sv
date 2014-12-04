@@ -22,10 +22,11 @@ Note that sv by default does not handle channel registrations. Instead, sv gives
 is identified with sv. With this, as long as the channel is occupied, the
 founder can pop in and out and bypass bans, reclaim chanop status, and change
 channel topic and modes. The intent behind this is for people to use their own
-bots to manage channel access and auto-op, instead of relying on a ChanServ or
-BotServ to do all this. Plus, if sv ever happens to go offline, people with
-their own bots will not be affected, as they will still have +r/founder which
-the IRCd handles, so all functionality the founder has will not be lost.
+bots to manage channel access and auto-op, or to manage the channel themselves,
+instead of relying on a ChanServ or BotServ to do all this. Plus, if sv ever
+happens to go offline, people with their own bots will not be affected, as they
+will still have +r/founder which the IRCd handles, so all functionality the
+founder mode has will not be lost.
 
 sv also does not do nickname registrations. Instead, upon identification it sets
 the user's ident to ^username (so luser!~luser@127.0.0.1 would become

@@ -21,3 +21,6 @@ db_file = "etc/sv.db"
 
 admin_user = "boss"
 admin_pass = "suuuuuuup"
+
+# trailing slash expected
+base_url = "http://example.net/"

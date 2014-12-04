@@ -17,6 +17,9 @@ memo send <username> <message>
 memo read {x-y,z|"all"|"unread"}
 memo delete {x-y,z|"all"|"read"}
 
+== channel ==
+transfer <#channel> <nickname>
+
 == set ==
 set notice [on|off]
 set contact [info]
@@ -35,6 +38,7 @@ allow plain [on|off]
 == oper ==
 drop <username> [permanent]
 freeze <username>
+global <message>
 list
 reset password <username>
 wall <message>

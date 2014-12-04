@@ -31,6 +31,7 @@ import os
 import re
 import socket
 import sys
+from threading import Thread
 from getopt import getopt, GetoptError
 from time import time, gmtime
 from binascii import crc32
@@ -53,7 +54,7 @@ for option, arg in options:
 		verbosity = 1
 	if option == "-h":
 		print "sv IRC services\n"
-		print "./sv.py -d -h -l logfile -n\n"
+		print "%s -d -h -l logfile -n\n" % sys.argv[0]
 		print "-d\tdebug to stdout"
 		print "-h\tthis help"
 		print "-l\tdebug to logfile"
@@ -62,6 +63,7 @@ for option, arg in options:
 	if option == "-l":
 		logfile = arg
 	if option == "-n":
+		# TODO daemonisation
 		daemonize = False
 
 
@@ -195,11 +197,15 @@ class User ():
 
 
 class Channel ():
-	def __init__ (self, name):
+	def __init__ (self, name, creator = None):
 		assert name not in channels
 		self.users = []
 		self.name = name
 		self.type = name[0]
+		self.founder = None
+		if creator is not None:
+			if creator.id is not None:
+				self.founder = creator
 		debug_line("Channel %s created" % self.name)
 
 	def add_user (self, user):
@@ -207,6 +213,7 @@ class Channel ():
 		self.users.append(user.nick)
 		user.join_channel(self)
 		debug_line("User %s added to channel %s" % (user.nick, self.name))
+		return user
 
 	def remove_user (self, user):
 		if user.nick in self.users:
@@ -290,17 +297,13 @@ def variable_cloak (user):
   # Block for things we shouldn't need to hardcode
 	if user.host == "127.0.0.1" and user.server == "UploadDownload.pw":
 		return "no-ip/tor/webchat"
-   ###############################################
-   # These can go in the ngircd.conf!!!
+  #
+  #################################################
+
 	elif user.server == "lolikaastbgo5dtk.onion":
 		return None
 	elif user.server == "koboijvbwowkcpj2.onion":
 		return None
-   #
-   ###############################################
-  #
-  #################################################
-
 	elif re.match(r"^(?:[0-2]?[0-9]{1,2}\.){3}(?:[0-2]?[0-9]{1,2})$", user.host) is not None:
 		# unresolved IP
 		mask = re.match(r"^([0-2]?[0-9]{1,2})\.([0-2]?[0-9]{1,2})\.([0-2]?[0-9]{1,2})\.([0-2]?[0-9]{1,2})$", user.host).groups()
@@ -312,7 +315,7 @@ def variable_cloak (user):
 		return out + "ip/cloak"
 	elif re.match(r"^[-a-zA-Z0-9]*$", user.host) is not None:
 		out = ""
-		for i in hashlib.md5(user.host[0]).digest()[8:]:
+		for i in hashlib.md5(user.host).digest()[8:]:
 			out += chr(ord(i) % 26 + 97)
 		return out + "/cloak"
 	elif re.match(r"^[-a-zA-Z0-9]*\.[-a-zA-Z0-9]*$", user.host) is not None:
@@ -336,10 +339,10 @@ def variable_cloak (user):
 
 def debug_prnt (line):
 	if verbosity >= 1:
-		print line
+		print "%.1f %s" % (round(time(), 1), line)
 
 	if logfile:
-		print >> file(logfile, "a"), line
+		print >> file(logfile, "a"), "%.1f %s" % (round(time(), 1), line)
 
 
 def load_db (file):
@@ -384,7 +387,6 @@ def save_db (file):
 
 		with open(file, "w") as fh:
 			for id in ids.itervalues():
-				print id.certfp
 				fh.write("ID %s %s %s %d %d %c %s%s\n" % (id.username,
 				 id.password[0], id.password[1], id.permissions,
 				 id.memos_unread, "N" if id.notice else "P",
@@ -468,7 +470,7 @@ def time_diff (then, now = time(), output_format = None):
 load_db(db_file)
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.connect(uplink)
-send_line("PASS %s 0210-IRC+ sv|3.1337:CMSX" % send_password)
+send_line("PASS %s 0210-IRC+ sv|3.1337:CLMSX" % send_password)
 send_line("SERVER %s 1 :%s" % (sv_host, server_info))
 send_line(":%s KILL %s :Make way! Services are linking, and you have my nick." %
  (sv_host, sv_nick))
@@ -500,13 +502,15 @@ try:
 					channel = line[2].split("\x07")[0]
 
 					if not channel in channels:
-						channels[channel] = Channel(channel)
+						channels[channel] = Channel(channel, users[nick])
 
 						if users[nick].id:
 							send_line(":%s MODE %s +r %s" %
-							 (sv_host, channel, users[nick].ident[1:]))
+							 (sv_host, channel, users[nick].get_id_variable("username")))
 
 					channels[channel].add_user(users[nick])
+					channel_url = "%23" + channel[1:] if channel[0] == "#" else channel
+					#send_line(":%s 328 %s %s :%s%s" % (sv_host, nick, channel, base_url + "channel/", channel_url))
 
 				elif icompare(line[1], "NJOIN"):
 					channel = line[2]
@@ -516,8 +520,15 @@ try:
 						channels[channel] = Channel(channel)
 
 					for nick in nicks:
-						debug_line("adding %s to %s" % (nick, channel))
+						# TODO dynamic prefixes?
 						channels[channel].add_user(users[nick.lstrip(":!~&@%+-")])
+
+				elif icompare(line[1], "MODE"):
+					target = line[2]
+					if len(line) == 5:
+						if line[3] == "+r":
+							channels[target].founder = line[4]
+							debug_line("Founder for %s is %s" % (target, line[4]))
 
 				elif icompare(line[1], "PART"):
 					nick = parse_msg(line[0])
@@ -559,6 +570,16 @@ try:
 #						send_line(":%s SERVICE %s!%s@%s 1 * %s 1 :%s" %
 #						 (sv_host, sv_nick, sv_ident,
 #						  sv_vhost, sv_modes, sv_gecos))
+					elif origin not in users:
+						# KILLs issued by servers
+						if users[target].server != origin:
+							for channel in users[target].channels.keys():
+								channels[channel].remove_user(users[target])
+
+								if not channels[channel].users:
+									del channels[channel]
+
+							del users[target]
 					elif users[target].server != users[origin].server:
 						# local KILLs are followed by a QUIT
 						for channel in users[target].channels.keys():
@@ -579,8 +600,15 @@ try:
 						ident = line[4]
 						host = line[5]
 						users[nick] = User(nick, ident, host, server)
-						if variable_cloak(users[nick]) is not None:
+						if variable_cloak(users[nick]) is not None and users[nick].cloakhost != variable_cloak(users[nick]):
+							# set up a queue, maybe, to allow the parser enough
+							# time to run into a METADATA CLOAKHOST if one is
+							# supplied? we have a lot of cloakhost conflicts and
+							# sv ends up desyncing a bit due to that. not to
+							# not to mention there are plenty of avoidable
+							# cloakhost changes
 							users[nick].set_cloakhost(variable_cloak(users[nick]))
+							send_line(":%s MODE %s +x" % (sv_host, nick))
 
 				elif icompare(line[1], "SERVICE"):
 					server = find_server(line[3])
@@ -593,12 +621,8 @@ try:
 					parameter = parse_msg(line[4:])
 					debug_line("Got METADATA %s" % " ".join(line[3:]))
 
-					if icompare(line[3], "accountname") and users[nick].id:
-						debug_line("Caught METADATA accountname asking %s to switch account name to %s. Ignoring" % (nick, parameter))
-						send_line(":%s NOTICE %s :Hey! I received a METADATA request to set accountname of \x02%s\x02 to \x02%s\x02. Am I conflicting with the demands of another services bot?" % (sv_nick, log_channel, nick, parameter))
-						send_line(":%s NOTICE %s :I'm setting our ID for \x02%s\x02 to None." % (sv_nick, log_channel, nick))
-						send_line(":%s NOTICE %s :Sorry %s, but I had to log you out from services due to server conflicts. Please contact an IRC operator to get this resolved." % (sv_nick, nick, nick))
-						users[nick].logout()
+					if icompare(line[3], "accountname") and parse_msg(parameter) in ids:
+						users[nick].set_id(parse_msg(parameter))
 
 					elif icompare(line[3], "certfp"):
 						users[nick].certfp = parameter
@@ -633,7 +657,7 @@ try:
 									# parse_msg() will eat this if we don't do it
 									if line[4][0] == ":":
 										line[4] == ":" + line[4]
-									send_line(":%s WALLOPS :(\x02%s\x02) %s" % (sv_nick, parse_msg(line[0]), parse_msg(line[4:])))
+									send_line(":%s WALLOPS :(\x02%s\x0F) %s" % (sv_nick, parse_msg(line[0]), parse_msg(line[4:])))
 							else:
 								notice(nick, "Permission denied.")
 
@@ -732,22 +756,61 @@ try:
 
 							notice(nick)
 							notice(nick, "For additional information on a certain command or topic,")
-							notice(nick, "use \x02/msg %s HELP command" % sv_nick)
+							notice(nick, "use \x02/msg %s\x0F\x02 HELP command" % sv_nick)
 							notice(nick, "\x02-= eof =-")
+
+						elif icompare(command, "MEMO"):
+							if len(line) < 5:
+								notice(nick, "Insufficient parameters for \x02MEMO\x02. Please")
+								notice(nick, "\x02/msg %s\x0F\x02 HELP MEMO\x02 for command help." % sv_nick)
+
+							elif users[nick].id is None:
+								notice(nick, "You are not identified.")
+
+							elif icompare(line[4], "READ"):
+								if len(line) < 6:
+									notice(nick, "Syntax is \x02MEMO READ range\x02 where range")
+									notice(nick, "can be a single number (1), range (1-5),")
+									notice(nick, "comma-delimited (1,3), or a combination (1-3,5,6-8).")
+									notice(nick, "It can also be \x02UNREAD\x02 or \x02ALL\x02.")
+								elif icompare(line[5], "UNREAD"):
+									pass
+									
+								elif icompare(line[5], "ALL"):
+									for i, memo in enumerate(users[nick].id.memos):
+										notice(nick, "\x02#%d\x0F: On \x02%s\x0F, \x02%s\x0F sent:" %
+										 (i, memo.sent, memo.sender))
+										notice(nick, memo.message)
+								elif re.match(r"(?:[0-9]+(?:[-,][0-9]+)*)", line[5]) is not None:
+									for n in line[5].split(","):
+										if "-" in n:
+											pass
+										else:
+											pass
+								else:
+									notice(nick, "Invalid range. Range can be a")
+									notice(nick, "single number (1), range (1-5),")
+									notice(nick, "comma-delimited (1,3), or a combination (1-3,5,6-8).")
+									notice(nick, "It can also be \x02UNREAD\x02 or \x02ALL\x02.")
+
+							else:
+								notice(nick, "Unrecognised command for \x02MEMO\x02. Accepted commands are")
+								notice(nick, "\x02SEND READ DELETE\x02.")
+								notice(nick, "Please \x02/msg %s\x0F\x02 HELP\x02 for command help." % sv_nick)
+		
 
 						elif icompare(command, "HOST"):
 							if len(line) < 5:
-								notice(nick, "Unrecognised command for \x02HOST\x02. Accepted commands are")
-								notice(nick, "\x02GIVE LIST OFF ON REQUEST TAKE\x02.")
-								notice(nick, "Please \x02/msg %s HELP\x02 for command help." % sv_nick)
+								notice(nick, "Insufficient parameters for \x02HOST\x02. Please")
+								notice(nick, "\x02/msg %s\x0F\x02 HELP HOST\x02 for command help." % sv_nick)
 
 							elif icompare(line[4], "GIVE"):
 								if users[nick].get_id_variable("permissions") > 0:
 									if line[5] in ids:
 										ids[line[5]].vhost = line[6]
-										notice(nick, "vhost \x02%s\x02 activated for \x02%s" % (line[6], line[5]))
+										notice(nick, "vhost \x02%s\x0F activated for \x02%s" % (line[6], line[5]))
 									else:
-										notice(nick, "\x02%s\x02 is not registered!" % line[5])
+										notice(nick, "\x02%s\x0F is not registered!" % line[5])
 								else:
 									notice(nick, "Permission denied.")
 
@@ -756,23 +819,26 @@ try:
 									notice(nick, "\x02-= HOST LIST =-")
 									notice(nick)
 									for i, vhost in enumerate(vhosts):
-										notice(nick, "[\x02%d\x02] \x02%s\x02" %
+										notice(nick, "[\x02%d\x0F] \x02%s" %
 										 (i, vhost))
 									notice(nick)
 									notice(nick, "\x02-= eof =-")
 								else:
-									notice(nick, "No vhosts are being offered. \x02/msg %s HOST LIST\x02 to" % sv_nick)
-									notice(nick, "get a list of vhosts you can choose from, or \x02/msg %s HOST REQUEST host\x02" % sv_nick)
+									notice(nick, "No vhosts are being offered. \x02/msg %s\x0F\x02 HOST LIST\x02 to" % sv_nick)
+									notice(nick, "get a list of vhosts you can choose from, or \x02/msg %s\x0F\x02 HOST REQUEST host" % sv_nick)
 									notice(nick, "to request one not on the list.")
 
 							elif icompare(line[4], "OFF"):
-								users[nick].toggle_vhost(False)
-								notice(nick, "Normal hostname restored.")
+								if users[nick].id != None:
+									users[nick].toggle_vhost(False)
+									notice(nick, "Normal hostname restored.")
+								else:
+									notice(nick, "You are not identified.")
 
 							elif icompare(line[4], "OFFER"):
 								if users[nick].get_id_variable("permissions") > 0:
 									if line[5] in vhosts:
-										notice(nick, "vhost \x02%s\x02 is already being offered!")
+										notice(nick, "vhost \x02%s\x0F is already being offered!")
 									else:
 										vhosts.append(line[5])
 										notice(nick, "vhost offered.")
@@ -787,23 +853,26 @@ try:
 											del vhosts[int(line[5])]
 											notice(nick, "vhost removed.")
 										else:
-											notice(nick, "vhost #\x02%d\x02 wasn't offered!" % i)
+											notice(nick, "vhost #\x02%d\x0F wasn't offered!" % i)
 									elif line[5] in vhosts:
 										vhosts.remove(line[5].lower())
 										notice(nick, "vhost removed.")
 									else:
-										notice(nick, "vhost \x02%s\x02 wasn't offered!" % line[5])
+										notice(nick, "vhost \x02%s\x0F wasn't offered!" % line[5])
 								else:
 									notice(nick, "Permission denied.")
 
 							elif icompare(line[4], "ON"):
-								users[nick].toggle_vhost(True)
-								notice(nick, "You are now using vhost \x02%s" % users[nick].get_id_variable("vhost"))
+								if users[nick].id != None:
+									users[nick].toggle_vhost(True)
+									notice(nick, "You are now using vhost \x02%s" % users[nick].get_id_variable("vhost"))
+								else:
+									notice(nick, "You are not identified.")
 
 							elif icompare(line[4], "REQUEST"):
 								if users[nick].id != None:
 									vrequests[users[nick].get_id_variable("username")] = line[5]
-									send_line(":%s NOTICE %s :vhost \x02%s\x02 requested by \x02%s\x02 (\x02%s\x02)" % (sv_nick, log_channel, line[5], nick, users[nick].get_id_variable("username")))
+									send_line(":%s NOTICE %s :vhost \x02%s\x0F requested by \x02%s\x0F (\x02%s\x0F)" % (sv_nick, log_channel, line[5], nick, users[nick].get_id_variable("username")))
 									notice(nick, "vhost requested.")
 								else:
 									notice(nick, "You are not identified.")
@@ -814,9 +883,9 @@ try:
 										ids[line[5]].vhost = vrequests[line[5]]
 										notice(nick, "vhost request accepted.")
 										ids[line[5]].add_memo(Memo(parse_msg(line[0]), time(),
-										 "Your vhost of \x02%s\x02 was accepted, and will take effect immediately."))
+										 "Your vhost of \x02%s\x0F was accepted, and will take effect immediately."))
 									else:
-										notice(nick, "\x02%s\x02 did not request a vhost.")
+										notice(nick, "\x02%s\x0F did not request a vhost." % line[5])
 								else:
 									notice(nick, "Permission denied.")
 
@@ -830,22 +899,22 @@ try:
 										users[nick].toggle_vhost(True)
 										notice(nick, "Your vhost is now \x02%s" % vhosts[i])
 									else:
-										notice(nick, "vhost #\x02%d\x02 is not being offered. \x02/msg %s HOST LIST\x02 to" % (i, sv_nick))
-										notice(nick, "get a list of vhosts you can choose from, or \x02/msg %s HOST REQUEST host" % sv_nick)
+										notice(nick, "vhost #\x02%d\x0F is not being offered. \x02/msg %s\x0F\x02 HOST LIST\x02 to" % (i, sv_nick))
+										notice(nick, "get a list of vhosts you can choose from, or \x02/msg %s\x0F\x02 HOST REQUEST host" % sv_nick)
 										notice(nick, "to request one not on the list.")
 								elif line[5] in vhosts:
 									users[nick].set_id_variable("vhost", line[5])
 									users[nick].toggle_vhost(True)
-									notice(nick, "Your vhost is now \x02%s\x02" % line[5])
+									notice(nick, "Your vhost is now \x02%s" % line[5])
 								else:
-									notice(nick, "vhost \x02%s\x02 is not being offered. \x02/msg %s HOST LIST\x02 to" % (line[5], sv_nick))
-									notice(nick, "get a list of vhosts you can choose from, or \x02/msg %s HOST REQUEST host" % sv_nick)
+									notice(nick, "vhost \x02%s\x02 is not being offered. \x02/msg %s\x0F\x02 HOST LIST\x02 to" % (line[5], sv_nick))
+									notice(nick, "get a list of vhosts you can choose from, or \x02/msg %s\x0F\x02 HOST REQUEST host" % sv_nick)
 									notice(nick, "to request one not on the list.")
 
 							else:
 								notice(nick, "Unrecognised command for \x02HOST\x02. Accepted commands are")
 								notice(nick, "\x02GIVE LIST OFF ON REQUEST TAKE\x02.")
-								notice(nick, "Please \x02/msg %s HELP HOST\x02 for command help." % sv_nick)
+								notice(nick, "Please \x02/msg %s\x0F\x02 HELP HOST\x02 for command help." % sv_nick)
 
 						elif icompare(command, "LOGOUT"):
 							if users[nick].id == None:
@@ -857,37 +926,39 @@ try:
 						elif icompare(command, "REGISTER"):
 							if len(line) > 5:
 								if line[4] == admin_user and line[5] != admin_pass:
-									notice(nick, "Account \x02%s\x02 reserved." % line[4])
+									notice(nick, "Account \x02%s\x0F reserved." % line[4])
 								elif line[4] in ids:
-									notice(nick, "Account \x02%s\x02 already exists." % line[4])
+									notice(nick, "Account \x02%s\x0F already exists." % line[4])
 								else:
 									ids[line[4]] = ID(line[4],
 									 set_password(line[5]), admin_user == line[4])
 									users[nick].set_id(line[4])
-									notice(nick, "Account \x02%s\x02 created." % line[4])
+									notice(nick, "Account \x02%s\x0F created." % line[4])
+									send_line(":%s NOTICE %s :account registered by \x02%s\x0F (\x02%s\x0F)" % (sv_nick, log_channel, nick, line[4]))
 							else:
 								notice(nick, "Insufficient parameters for \x02REGISTER\x02. Please")
-								notice(nick, "\x02/msg %s REGISTER username password\x02 where \x02username\x02 and")
-								notice(nick, "\x02password\x02 are replaced with your desired username and password." % sv_nick)
+								notice(nick, "\x02/msg %s\x0F\x02 REGISTER username password\x02 where \x02username\x02 and" % sv_nick)
+								notice(nick, "\x02password\x02 are replaced with your desired username and password.")
 
 						#elif icompare(command, ["IDENTIFY", "ID", "LOGIN"]) and len(line) > 5:
 						elif icompare(command, "LOGIN"):
 							if len(line) > 5:
 								if line[4] not in ids:
-									notice(nick, "Account \x02%s\x02 is not registered." % line[4])
+									notice(nick, "Account \x02%s\x0F is not registered." % line[4])
 								elif users[nick].id != None:
 									notice(nick, "You are already identified for this username.")
 								elif check_password(line[5], ids[line[4]].password):
 									users[nick].set_id(line[4])
 									notice(nick, "Identified.")
 									if ids[line[4]].memos_unread:
-										notice(nick, "You have %d unread memos." % ids[line[4]].memos_unread)
+										notice(nick, "You have \x02%d\x0F unread memo%s." %
+										 (ids[line[4]].memos_unread, "" if ids[line[4]].memos_unread == 1 else "s"))
 								else:
 									notice(nick, "Incorrect password.")
 							else:
 								notice(nick, "Insufficient parameters for \x02LOGIN\x02. Please")
-								notice(nick, "\x02/msg %s LOGIN username password\x02 where \x02username\x02 and")
-								notice(nick, "\x02password\x02 are replaced with the username and password you used to register." % sv_nick)
+								notice(nick, "\x02/msg %s\x0F\x02 LOGIN username password\x02 where \x02username\x02 and")
+								notice(nick, "\x02password\x02 are replaced with the username and password you used to register.")
 
 						elif icompare(command, "SET"):
 							if len(line) > 4:
@@ -902,7 +973,7 @@ try:
 										else:
 											notice(nick, "Syntax is \x02SET NOTICE on/off")
 									else:
-										notice(nick, "Current NOTICE setting: %s" %
+										notice(nick, "Current NOTICE setting: \x02%s" %
 										 "on (NOTICE)" if users[nick].get_id_variable("notice") else "off (PRIVMSG)")
 								elif icompare(line[4], "CONTACT"):
 									notice(nick, "TODO")
@@ -922,10 +993,10 @@ try:
 								else:
 									notice(nick, "Unrecognised command for \x02SET\x02. Accepted commands are")
 									notice(nick, "\x02NOTICE CONTACT PASSWORD MAXMEMOS MEMOFWD\x02.")
-									notice(nick, "Please \x02/msg %s HELP SET\x02 for command help." % sv_nick)
+									notice(nick, "Please \x02/msg %s\x0F\x02 HELP SET\x02 for command help." % sv_nick)
 							else:
 								notice(nick, "Insufficient parameters for \x02SET\x02. Please")
-								notice(nick, "\x02/msg %s HELP SET\x02 for command help." % sv_nick)
+								notice(nick, "\x02/msg %s\x0F\x02 HELP SET\x02 for command help." % sv_nick)
 
 						elif icompare(command, "ALLOW"):
 							if len(line) > 4:
@@ -938,14 +1009,45 @@ try:
 												notice(nick, "This fingerprint is already accepted.")
 											elif len(line) == 6:
 												users[nick].set_id_variable("certfp-append", users[nick].certfp)
-												notice(nick, "Fingerprint \x02%s\x02 added." % users[nick].certfp)
+												notice(nick, "Fingerprint \x02%s\x0F added." % users[nick].certfp)
 							else:
 								notice(nick, "Unrecognised command for \x02ALLOW\x02. Accepted commands are")
 								notice(nick, "\x02ADD DEL LIST PLAIN\x02.")
-								notice(nick, "Please \x02/msg %s HELP ALLOW\x02 for command help." % sv_nick)
+								notice(nick, "Please \x02/msg %s\x0F\x02 HELP ALLOW\x02 for command help." % sv_nick)
+
+						elif icompare(command, "TRANSFER"):
+							if len(line) > 5:
+								if line[4][0] == "#" and line[5] in users:
+									if users[nick].id is None:
+										notice(nick, "You are not identified.")
+									elif users[line[5]].id is None:
+										notice(nick, "\x02%s\x0F is not identified." % line[5])
+									elif users[nick].id != channels[line[4]].founder:
+										notice(nick, "You aren't founder of \x02%s\x0F!" % line[4])
+									else:
+										send_line(":%s JOIN :%s" % (sv_nick, line[4]))
+										send_line(":%s MODE %s +yr %s %s" % (sv_host, line[4], sv_nick, users[line[5]].get_id_variable("username")))
+										send_line(":%s INVITE %s %s" % (sv_nick, line[5], line[4]))
+										send_line(":%s NOTICE %s :I'm just stopping by to TRANSFER ownership of \x02%s\x0F from \x02%s\x0F to \x0F%s" % (sv_nick, line[4], line[4], nick, line[5]))
+										send_line(":%s PART %s :See ya!" % (sv_nick, line[4]))
+							else:
+								notice(nick, "Insufficient parameters for \x02TRANSFER\x02. Please")
+								notice(nick, "\x02/msg %s\x0F\x02 HELP TRANSFER\x02 for command help." % sv_nick)
+
+						elif icompare(command, "WHY"):
+							if len(line) > 4:
+								if line[4] not in channels:
+									notice(nick, "WHY - %s does not exist" % line[4])
+								elif users[nick].get_id_variable("username") == channels[line[4]].founder:
+									notice(nick, "WHY + %s You are founder (+r)" % line[4])
+								else:
+									notice(nick, "WHY - %s You must be founder (+r) to use this command." % line[4])
+							else:
+								notice(nick, "\x02WHY\x02 is primarily a command for channel bots. Please")
+								notice(nick, "\x02/msg %s\x0F\x02 HELP WHY\x02 for command help." % sv_nick)
 
 						else:
-							notice(nick, "Unrecognised command or incorrect syntax. Please \x02/msg %s HELP\x02 for command help." % sv_nick)
+							notice(nick, "Unrecognised command or incorrect syntax. Please \x02/msg %s\x0F\x02 HELP\x02 for command help." % sv_nick)
 
 					else:
 						# we're either getting fantasy commands or someone's
