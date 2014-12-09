@@ -98,6 +98,12 @@ class ID ():
 	def add_memo (self, memo):
 		self.memos.append(memo)
 
+	def del_memo (self, memo):
+		if memo in self.memos:
+			self.memos.remove(memo)
+			return 0
+		return 1
+
 	def count_unread (self):
 		i = 0
 		for memo in self.memos:
@@ -183,8 +189,8 @@ class User ():
 		self.channels[channel.name] = channel
 
 	def part_channel (self, channel):
-		if channel.name in self.channels:
-			del self.channels[channel.name]
+		assert channel.name in self.channels
+		del self.channels[channel.name]
 
 	def logout (self):
 		self.id = None
@@ -280,13 +286,11 @@ def find_server (id):
 			return server.name
 
 
-#*DNS			->	abcd.efgh.sld.tld/cloak
+#*DNS			->	abcdefgh.sld.tld/cloak
 #*IPv4			->	ab.cd.ef.gh.ip/cloak
 # IPv6			->	ab:cd:ef:gh:ij:kl/cloak
 # 
-# Server		->	no-ip/tor/lolikaastbgo5dtk.onion
 # IP on server	->	no-ip/tor/webchat
-# Server		->	i2p/abcdefgh
 # 
 # Offer			->	unaffiliated/user
 # Offer to +B	->	unaffiliated/bot/owner
@@ -473,8 +477,14 @@ def time_diff (then, now = time.time(), output_format = None):
 
 def time_str (t):
 	t = time.gmtime(t)
-	print t
-	return "%d-%d-%d, %d:%d:%d" % (t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)
+	return "%d-%s%d-%s%d, %s%d:%s%d:%s%d" % (
+	 t.tm_year,
+	 "" if t.tm_mon > 9 else "0", t.tm_mon,
+	 "" if t.tm_mday > 9 else "0", t.tm_mday,
+	 "" if t.tm_hour > 9 else "0", t.tm_hour,
+	 "" if t.tm_min > 9 else "0", t.tm_min,
+	 "" if t.tm_sec > 9 else "0", t.tm_sec
+	)
 
 
 load_db(db_file)
@@ -680,53 +690,69 @@ try:
 									notice(nick, "\x02HELP\x02:")
 									notice(nick, "	used for obtaining a list of %s's features or describing certain" % sv_nick)
 									notice(nick, "	commands and features")
+
 								elif icompare(line[4], "HOST"):
 									notice(nick, "\x02HOST REQUEST vhost\x02:")
 									notice(nick, "	request a vhost")
+
 									notice(nick, "\x02HOST LIST\x02:")
 									notice(nick, "	list available vhosts")
+
 									notice(nick, "\x02HOST TAKE vhost\x02:")
 									notice(nick, "	sets your vhost to one in LIST;")
 									notice(nick, "	argument can either be full vhost or index number")
 									notice(nick, "	(e.g. \x02TAKE my.special.vhost\x02 or \x02TAKE 2\x02)")
+
 									if users[nick].get_id_variable("permissions"):
 										notice(nick, "\x02HOST GIVE username vhost\x02:")
 										notice(nick, "	sets a user's vhost")
+
 										notice(nick, "\x02HOST OFFER vhost\x02:")
 										notice(nick, "	offer a vhost")
+
 										notice(nick, "\x02HOST ACCEPT username\x02")
 										notice(nick, "	accept user's vhost request")
+
 										notice(nick, "\x02HOST DENY username\x02")
 										notice(nick, "	deny user's vhost request")
+
 									notice(nick, "\x02HOST ON\x02:")
 									notice(nick, "	activate your currently set vhost")
+
 									notice(nick, "\x02HOST OFF\x02:")
 									notice(nick, "	restore normal cloaking")
+
 								elif icompare(line[4], "REGISTER"):
 									notice(nick, "\x02REGISTER username password\x02:")
 									notice(nick, "	registers an account with services under your chosen name and")
 									notice(nick, "	secured with a password of your choice. Having a services account")
 									notice(nick, "	enables you to take advantage of various features offered by services.")
+
 								elif icompare(line[4], "LOGIN"):
 									notice(nick, "\x02LOGIN username password\x02:")
 									notice(nick, "	identifies you with an existing services account.")
 									notice(nick, "	If you do not have an account, please see the REGISTER command")
+
 								elif icompare(line[4], "MEMO"):
 									notice(nick, "\x02MEMO DELETE range\x02:")
 									notice(nick, "	deletes memos. range can be a single number (1), range (1-5),")
 									notice(nick, "	comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
 									notice(nick, "	\x02READ\x02 or \x02ALL\x02.")
+
 									notice(nick, "\x02MEMO READ range\x02:")
 									notice(nick, "	recalls memos and marks as read. range can be a single number (1),")
 									notice(nick, "	range (1-5), comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
 									notice(nick, "	\x02UNREAD\x02 or \x02ALL\x02.")
+
 									notice(nick, "\x02MEMO SEND username message\x02:")
 									notice(nick, "	sends a message to someone else registered with sv")
+
 								elif icompare(line[4], "RESTORE"):
 									notice(nick, "\x02RESTORE username code new-password\x02:")
 									notice(nick, "	if you have forgotten your password, you can request a code")
 									notice(nick, "	be sent to you in order to use this command to create a new")
 									notice(nick, "	password for your account.")
+
 								else:
 									notice(nick, "\x02%s\x02 is not a command or topic covered by the help system." % line[4])
 									notice(nick, "Use \x02/msg %s HELP\x02 for a list of help topics, or" % sv_nick)
@@ -735,32 +761,44 @@ try:
 							else:
 								notice(nick, "\x02HELP\x02:")
 								notice(nick, "	this help")
+
 								notice(nick, "\x02HOST\x02:")
 								notice(nick, "	vhost tools (\x02/msg %s HELP HOST\x02 for subcommands)" % sv_nick)
+
 								notice(nick, "\x02REGISTER username password\x02:")
 								notice(nick, "	registers a new username.")
+
 								notice(nick, "\x02LOGIN username password\x02:")
 								#notice(nick, "	(also \x02IDENTIFY\x02 and \x02ID\x02)")
 								notice(nick, "	identifies you to an existing username")
+
 								notice(nick, "\x02LOGOUT\x02:")
 								notice(nick, "	logs you out of your currently identified username")
+
 								notice(nick, "\x02MEMO\x02:")
 								notice(nick, "	memo tools (\x02/msg %s HELP MEMO\x02 for subcommands)" % sv_nick)
+
 								notice(nick, "\x02RESTORE username code new-password\x02:")
 								notice(nick, "	restores password for username.")
 								notice(nick, "	Please ask an operator for the password reset code before using this command.")
+
 								if users[nick].get_id_variable("permissions"):
 									notice(nick)
 									notice(nick, "\x02GLOBAL message\x02:")
 									notice(nick, "	sends a WALLOPS")
+
 									notice(nick, "\x02FREEZE username\x02:")
 									notice(nick, "	restricts username")
+
 									notice(nick, "\x02DROP username\x02:")
 									notice(nick, "	holds username from being used")
+
 									notice(nick, "\x02DROP username PERMANENT\x02:")
 									notice(nick, "	votes for username to be deleted from database, not just marked as dropped")
+
 									notice(nick, "\x02LIST\x02:")
 									notice(nick, "	lists registered usernames")
+
 									notice(nick, "\x02RESET password\x02:")
 									notice(nick, "	generates a code to give a user to reset their password")
 
@@ -783,17 +821,20 @@ try:
 									notice(nick, "can be a single number (1), range (1-5),")
 									notice(nick, "comma-delimited (1,3), or a combination (1-3,5,6-8).")
 									notice(nick, "It can also be \x02UNREAD\x02 or \x02ALL\x02.")
+
 								elif icompare(line[5], "UNREAD"):
 									for i, memo in enumerate(users[nick].id.memos):
 										if memo.read: continue
 										notice(nick, "\x02#%d\x0F: On \x02%s\x0F, \x02%s\x0F sent:" % (i, time_str(memo.sent), memo.sender))
 										notice(nick, memo.message)
+										memo.read = True
 									notice(nick, "\x02-= eof =-")
 									
 								elif icompare(line[5], "ALL"):
 									for i, memo in enumerate(users[nick].id.memos):
 										notice(nick, "\x02#%d\x0F: On \x02%s\x0F, \x02%s\x0F sent:" % (i, time_str(memo.sent), memo.sender))
 										notice(nick, memo.message)
+										memo.read = True
 									notice(nick, "\x02-= eof =-")
 
 								elif re.match(r"[0-9]+(?:[-,][0-9]+)*", line[5]) is not None:
@@ -804,14 +845,17 @@ try:
 												memo = users[nick].id.memos[i]
 												notice(nick, "\x02#%d\x0F: On \x02%s\x0F, \x02%s\x0F sent:" % (i, time_str(memo.sent), memo.sender))
 												notice(nick, memo.message)
+												memo.read = True
 										else:
 											if int(n) < len(users[nick].id.memos):
 												memo = users[nick].id.memos[int(n)]
 												notice(nick, "\x02#%s\x0F: On \x02%s\x0F, \x02%s\x0F sent:" % (n, time_str(memo.sent), memo.sender))
 												notice(nick, memo.message)
+												memo.read = True
 											else:
-												notice(nick, "memo does not exist")
+												notice(nick, "Memo does not exist")
 									notice(nick, "\x02-= eof =-")
+
 								else:
 									notice(nick, "Invalid range. Range can be a")
 									notice(nick, "single number (1), range (1-5),")
@@ -828,6 +872,50 @@ try:
 								else:
 									notice(nick, "\x02%s\x0F is not registered!" % line[5])
 								
+							elif icompare(line[4], "DEL"):
+								prune = []
+
+								if len(line) < 6:
+									notice(nick, "Syntax is \x02MEMO DELETE range\x02 where range")
+									notice(nick, "can be a single number (1), range (1-5),")
+									notice(nick, "comma-delimited (1,3), or a combination (1-3,5,6-8).")
+									notice(nick, "It can also be \x02READ\x02 or \x02ALL\x02.")
+
+								elif icompare(line[5], "READ"):
+									for i, __ in enumerate(users[nick].id.memos):
+										if not memo.read: continue
+										prune.append(i)
+									
+								elif icompare(line[5], "ALL"):
+									users[nick].id.memos = []
+									notice(nick, "Deleted \x02%d\x0F memos" % len(memos))
+
+								elif re.match(r"[0-9]+(?:[-,][0-9]+)*", line[5]) is not None:
+									for n in line[5].split(","):
+										if "-" in n:
+											for i in xrange(int(n.split("-")[0]),
+											 int(n.split("-")[1]) if int(n.split("-")[1]) < len(users[nick].id.memos) else len(users[nick].id.memos) - 1):
+												prune.append(i)
+										else:
+											if int(n) < len(users[nick].id.memos):
+												prune.append(int(n))
+											else:
+												notice(nick, "Memo does not exist")
+								
+								else:
+									notice(nick, "Invalid range. Range can be a")
+									notice(nick, "single number (1), range (1-5),")
+									notice(nick, "comma-delimited (1,3), or a combination (1-3,5,6-8).")
+									notice(nick, "It can also be \x02UNREAD\x02 or \x02ALL\x02.")
+
+								print prune
+								for i in prune:
+									del users[nick].id.memos[i]
+
+								if len(prune):
+									notice(nick, "Deleted \x02%d\x0F memos" % len(prune))
+
+								del prune
 
 							else:
 								notice(nick, "Unrecognised command for \x02MEMO\x02. Accepted commands are")
