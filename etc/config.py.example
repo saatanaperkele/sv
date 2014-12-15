@@ -2,6 +2,12 @@ if __name__ == '__main__':
 	print "Start sv.py, not this!"
 	exit(1)
 
+from submodule import check_output
+try:
+	sv_version = submodule.check_output(["git", "describe"])
+except CalledProcessError:
+	sv_version = "v?.?"
+
 # edit below here
 
 sv_host = "services.sv"
@@ -11,7 +17,7 @@ send_password = "ayyyyyyyyyy"
 recv_password = "yoooooooooo"
 
 sv_nick = "sv"
-sv_ident = "bot"
+sv_id = "services"
 sv_vhost = "services.sv"
 sv_gecos = "IRC services"
 sv_modes = "+oB"

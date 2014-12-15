@@ -364,8 +364,15 @@ def load_db (file):
 
 			# this part of the code wins best eyesore award
 			if arg[0] == "ID" and len(arg) == 9:
-				ids[arg[1]] = ID(arg[1], (arg[2], arg[3]), int(arg[4]),
-				 False if arg[6] == "P" else True, arg[8], int(arg[5]), arg[7])
+				ids[arg[1]] = ID(
+				 username = arg[1],
+				 password_hash = (arg[2], arg[3]),
+				 is_admin = int(arg[4]),
+				 notice = False if arg[6] == "P" else True,
+				 vhost = arg[8],
+				 memos_unread = int(arg[5]),
+				 certfp = arg[7]
+				)
 			elif arg[0] == "ID" and len(arg) == 8:
 				ids[arg[1]] = ID(arg[1], (arg[2], arg[3]), int(arg[4]),
 				 False if arg[6] == "P" else True, None, int(arg[5]), arg[7])
@@ -386,7 +393,6 @@ def load_db (file):
 
 	except IOError:
 		debug_line("Database <%s> cannot be opened for writing" % file)
-
 
 def save_db (file):
 	try:
@@ -488,13 +494,24 @@ def time_str (t):
 
 
 load_db(db_file)
+ids[sv_id] = ID(
+ username = sv_id,
+ password_hash = (None, None),
+ is_admin = 1,
+ notice = True,
+ vhost = sv_vhost,
+ memos_unread = 0,
+ certfp = ""
+)
+
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.connect(uplink)
-send_line("PASS %s 0210-IRC+ sv|3.1337:CLMSX" % send_password)
+
+send_line("PASS %s 0210-IRC+ sv|%s:CLMSX" % (send_password, sv_version))
 send_line("SERVER %s 1 :%s" % (sv_host, server_info))
 send_line(":%s KILL %s :Make way! Services are linking, and you have my nick." %
  (sv_host, sv_nick))
-send_line(":%s SERVICE %s!%s@%s 1 * %s 1 :%s" % (sv_host, sv_nick, sv_ident,
+send_line(":%s SERVICE %s!^%s@%s 1 * %s 1 :%s" % (sv_host, sv_nick, sv_id,
  sv_vhost, sv_modes, sv_gecos))
 send_line(":%s NJOIN %s :~%s" % (sv_host, log_channel, sv_nick))
 
@@ -585,7 +602,7 @@ try:
 					origin = parse_msg(line[0])
 					target = line[2]
 
-					if icompare(nick, sv_nick):
+					if icompare(target, sv_nick):
 						pass
 #						send_line(":%s SERVICE %s!%s@%s 1 * %s 1 :%s" %
 #						 (sv_host, sv_nick, sv_ident,
@@ -1146,7 +1163,7 @@ try:
 										notice(nick, "You are not identified.")
 									elif users[line[5]].id is None:
 										notice(nick, "\x02%s\x0F is not identified." % line[5])
-									elif users[nick].id != channels[line[4]].founder:
+									elif users[nick].get_id_variable("username") != channels[line[4]].founder:
 										notice(nick, "You aren't founder of \x02%s\x0F!" % line[4])
 									else:
 										send_line(":%s JOIN :%s" % (sv_nick, line[4]))
