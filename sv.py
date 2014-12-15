@@ -494,15 +494,16 @@ def time_str (t):
 
 
 load_db(db_file)
-ids[sv_id] = ID(
- username = sv_id,
- password_hash = (None, None),
- is_admin = 1,
- notice = True,
- vhost = sv_vhost,
- memos_unread = 0,
- certfp = ""
-)
+if sv_id not in ids:
+	ids[sv_id] = ID(
+	 username = sv_id,
+	 password_hash = (None, None),
+	 is_admin = 1,
+	 notice = True,
+	 vhost = sv_vhost,
+	 memos_unread = 0,
+	 certfp = ""
+	)
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.connect(uplink)
