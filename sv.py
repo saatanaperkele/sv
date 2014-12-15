@@ -213,6 +213,7 @@ class Channel ():
 		self.users = []
 		self.name = name
 		self.type = name[0]
+		self.mode = ""
 		self.founder = None
 		if creator is not None:
 			if creator.id is not None:
@@ -561,6 +562,14 @@ try:
 						# TODO dynamic prefixes?
 						channels[channel].add_user(users[nick.lstrip(":!~&@%+-")])
 
+				elif icompare(line[1], "CHANINFO"):
+					channel = line[2]
+
+					if not channel in channels:
+						channels[channel] = Channel(channel)
+					
+					channels[channel].mode = line[3].lstrip("+")
+
 				elif icompare(line[1], "MODE"):
 					target = line[2]
 					if len(line) == 5:
@@ -680,6 +689,60 @@ try:
 
 					elif icompare(line[3], "user"):
 						users[nick].set_ident(parse_msg(parameter), false)
+
+				elif icompare(line[1], "VERSION"):
+					send_line(":%s 351 %s sv-%s %s :" % (sv_host, parse_msg(line[0]), sv_version, sv_host))
+
+				elif icompare(line[1], "WHOIS"):
+					origin = parse_msg(line[0])
+
+					send_line(":%s 311 %s %s ^%s %s :%s" % (sv_host, origin, sv_nick, sv_id, sv_vhost, sv_gecos))
+					send_line(":%s 312 %s %s %s :%s" % (sv_host, origin, sv_nick, sv_host, server_info))
+					send_line(":%s 310 %s %s :is an IRC bot" % (sv_host, origin, sv_nick))
+					send_line(":%s 313 %s %s :is an IRC service" % (sv_host, origin, sv_nick))
+					send_line(":%s 318 %s %s :End of WHOIS\n" % (sv_host, origin, sv_nick))
+
+				elif icompare(line[1], "LUSERS"):
+					origin = parse_msg(line[0])
+
+					send_line(":%s 251 %s :There are %d users on %d servers\n" % (sv_host, origin, len(users), len(servers)))
+					send_line(":%s 254 %s :%d channel%s formed\n" % (sv_host, origin, len(channels), "s" if len(channels) != 1 else ""))
+
+				elif icompare(line[1], "MOTD"):
+					origin = parse_msg(line[0])
+					try:
+						send_line(":%s 375 %s :- %s message of the day" % (sv_host, origin, sv_host))
+
+						for line in open("etc/motd"):
+							send_line(":%s 372 %s :- %s" % (sv_host, origin, line))
+
+						send_line(":%s 376 %s :End of MOTD command" % (sv_host, origin))
+
+					except IOError:
+						send_line(":%s 422 %s :MOTD file is missing" % (sv_host, origin))
+						
+
+				elif icompare(line[1], "LIST"):
+					origin = parse_msg(line[0])
+					for channel in channels.itervalues():
+						if "s" in channel.mode:
+							send_line(":%s 322 %s * %s :" % (
+							 sv_host,
+							 origin,
+							 len(channel.users),
+							))
+							continue
+
+						send_line(":%s 322 %s %s %s :%s%s" % (
+						 sv_host,
+						 origin,
+						 channel.name,
+						 len(channel.users),
+						 "Founder is " if channel.founder else "",
+						 channel.founder if channel.founder else ""
+						))
+
+					send_line(":%s 323 %s :End of LIST" % (sv_host, origin))
 
 				elif icompare(line[1], "PRIVMSG"):
 					nick = parse_msg(line[0])

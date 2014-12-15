@@ -4,7 +4,7 @@ if __name__ == '__main__':
 
 from submodule import check_output
 try:
-	sv_version = submodule.check_output(["git", "describe"])
+	sv_version = submodule.check_output(["git", "describe"]).split("\n")[0]
 except CalledProcessError:
 	sv_version = "v?.?"
 
