@@ -165,7 +165,7 @@ class User ():
 	def get_id_variable (self, variable):
 		if self.id == None: return None
 
-		if variable == "username": return self.id.username
+		if variable == "username": return self.id.username.lower()
 		if variable == "permissions": return self.id.permissions
 		if variable == "notice": return self.id.notice
 		if variable == "vhost": return self.id.vhost
@@ -266,7 +266,7 @@ def icompare (one, two):
 def parse_msg (message):
 	if type(message) == str:
 		if message[0] == ":":
-			return message[1:]
+			return (message[1:] if len(message) > 1 else "")
 		return message
 	if message[0][0] == ":":
 		message[0] = message[0][1:]
@@ -769,70 +769,70 @@ try:
 							if len(line) > 4:
 								if icompare(line[4], "HELP"):
 									notice(nick, "\x02HELP\x02:")
-									notice(nick, "	used for obtaining a list of %s's features or describing certain" % sv_nick)
-									notice(nick, "	commands and features")
+									notice(nick, "    used for obtaining a list of %s's features or describing certain" % sv_nick)
+									notice(nick, "    commands and features")
 
 								elif icompare(line[4], "HOST"):
 									notice(nick, "\x02HOST REQUEST vhost\x02:")
-									notice(nick, "	request a vhost")
+									notice(nick, "    request a vhost")
 
 									notice(nick, "\x02HOST LIST\x02:")
-									notice(nick, "	list available vhosts")
+									notice(nick, "    list available vhosts")
 
 									notice(nick, "\x02HOST TAKE vhost\x02:")
-									notice(nick, "	sets your vhost to one in LIST;")
-									notice(nick, "	argument can either be full vhost or index number")
-									notice(nick, "	(e.g. \x02TAKE my.special.vhost\x02 or \x02TAKE 2\x02)")
+									notice(nick, "    sets your vhost to one in LIST;")
+									notice(nick, "    argument can either be full vhost or index number")
+									notice(nick, "    (e.g. \x02TAKE my.special.vhost\x02 or \x02TAKE 2\x02)")
 
 									if users[nick].get_id_variable("permissions"):
 										notice(nick, "\x02HOST GIVE username vhost\x02:")
-										notice(nick, "	sets a user's vhost")
+										notice(nick, "    sets a user's vhost")
 
 										notice(nick, "\x02HOST OFFER vhost\x02:")
-										notice(nick, "	offer a vhost")
+										notice(nick, "    offer a vhost")
 
 										notice(nick, "\x02HOST ACCEPT username\x02")
-										notice(nick, "	accept user's vhost request")
+										notice(nick, "    accept user's vhost request")
 
 										notice(nick, "\x02HOST DENY username\x02")
-										notice(nick, "	deny user's vhost request")
+										notice(nick, "    deny user's vhost request")
 
 									notice(nick, "\x02HOST ON\x02:")
-									notice(nick, "	activate your currently set vhost")
+									notice(nick, "    activate your currently set vhost")
 
 									notice(nick, "\x02HOST OFF\x02:")
-									notice(nick, "	restore normal cloaking")
+									notice(nick, "    restore normal cloaking")
 
 								elif icompare(line[4], "REGISTER"):
 									notice(nick, "\x02REGISTER username password\x02:")
-									notice(nick, "	registers an account with services under your chosen name and")
-									notice(nick, "	secured with a password of your choice. Having a services account")
-									notice(nick, "	enables you to take advantage of various features offered by services.")
+									notice(nick, "    registers an account with services under your chosen name and")
+									notice(nick, "    secured with a password of your choice. Having a services account")
+									notice(nick, "    enables you to take advantage of various features offered by services.")
 
 								elif icompare(line[4], "LOGIN"):
 									notice(nick, "\x02LOGIN username password\x02:")
-									notice(nick, "	identifies you with an existing services account.")
-									notice(nick, "	If you do not have an account, please see the REGISTER command")
+									notice(nick, "    identifies you with an existing services account.")
+									notice(nick, "    If you do not have an account, please see the REGISTER command")
 
 								elif icompare(line[4], "MEMO"):
 									notice(nick, "\x02MEMO DELETE range\x02:")
-									notice(nick, "	deletes memos. range can be a single number (1), range (1-5),")
-									notice(nick, "	comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
-									notice(nick, "	\x02READ\x02 or \x02ALL\x02.")
+									notice(nick, "    deletes memos. range can be a single number (1), range (1-5),")
+									notice(nick, "    comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
+									notice(nick, "    \x02READ\x02 or \x02ALL\x02.")
 
 									notice(nick, "\x02MEMO READ range\x02:")
-									notice(nick, "	recalls memos and marks as read. range can be a single number (1),")
-									notice(nick, "	range (1-5), comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
-									notice(nick, "	\x02UNREAD\x02 or \x02ALL\x02.")
+									notice(nick, "    recalls memos and marks as read. range can be a single number (1),")
+									notice(nick, "    range (1-5), comma-delimited (1,3), or a combination (1-3,5,6-8). It can also be")
+									notice(nick, "    \x02UNREAD\x02 or \x02ALL\x02.")
 
 									notice(nick, "\x02MEMO SEND username message\x02:")
-									notice(nick, "	sends a message to someone else registered with sv")
+									notice(nick, "    sends a message to someone else registered with sv")
 
 								elif icompare(line[4], "RESTORE"):
 									notice(nick, "\x02RESTORE username code new-password\x02:")
-									notice(nick, "	if you have forgotten your password, you can request a code")
-									notice(nick, "	be sent to you in order to use this command to create a new")
-									notice(nick, "	password for your account.")
+									notice(nick, "    if you have forgotten your password, you can request a code")
+									notice(nick, "    be sent to you in order to use this command to create a new")
+									notice(nick, "    password for your account.")
 
 								else:
 									notice(nick, "\x02%s\x02 is not a command or topic covered by the help system." % line[4])
@@ -841,47 +841,47 @@ try:
 
 							else:
 								notice(nick, "\x02HELP\x02:")
-								notice(nick, "	this help")
+								notice(nick, "    this help")
 
 								notice(nick, "\x02HOST\x02:")
-								notice(nick, "	vhost tools (\x02/msg %s HELP HOST\x02 for subcommands)" % sv_nick)
+								notice(nick, "    vhost tools (\x02/msg %s HELP HOST\x02 for subcommands)" % sv_nick)
 
 								notice(nick, "\x02REGISTER username password\x02:")
-								notice(nick, "	registers a new username.")
+								notice(nick, "    registers a new username.")
 
 								notice(nick, "\x02LOGIN username password\x02:")
-								#notice(nick, "	(also \x02IDENTIFY\x02 and \x02ID\x02)")
-								notice(nick, "	identifies you to an existing username")
+								#notice(nick, "    (also \x02IDENTIFY\x02 and \x02ID\x02)")
+								notice(nick, "    identifies you to an existing username")
 
 								notice(nick, "\x02LOGOUT\x02:")
-								notice(nick, "	logs you out of your currently identified username")
+								notice(nick, "    logs you out of your currently identified username")
 
 								notice(nick, "\x02MEMO\x02:")
-								notice(nick, "	memo tools (\x02/msg %s HELP MEMO\x02 for subcommands)" % sv_nick)
+								notice(nick, "    memo tools (\x02/msg %s HELP MEMO\x02 for subcommands)" % sv_nick)
 
 								notice(nick, "\x02RESTORE username code new-password\x02:")
-								notice(nick, "	restores password for username.")
-								notice(nick, "	Please ask an operator for the password reset code before using this command.")
+								notice(nick, "    restores password for username.")
+								notice(nick, "    Please ask an operator for the password reset code before using this command.")
 
 								if users[nick].get_id_variable("permissions"):
 									notice(nick)
 									notice(nick, "\x02GLOBAL message\x02:")
-									notice(nick, "	sends a WALLOPS")
+									notice(nick, "    sends a WALLOPS")
 
 									notice(nick, "\x02FREEZE username\x02:")
-									notice(nick, "	restricts username")
+									notice(nick, "    restricts username")
 
 									notice(nick, "\x02DROP username\x02:")
-									notice(nick, "	holds username from being used")
+									notice(nick, "    holds username from being used")
 
 									notice(nick, "\x02DROP username PERMANENT\x02:")
-									notice(nick, "	votes for username to be deleted from database, not just marked as dropped")
+									notice(nick, "    votes for username to be deleted from database, not just marked as dropped")
 
 									notice(nick, "\x02LIST\x02:")
-									notice(nick, "	lists registered usernames")
+									notice(nick, "    lists registered usernames")
 
 									notice(nick, "\x02RESET password\x02:")
-									notice(nick, "	generates a code to give a user to reset their password")
+									notice(nick, "    generates a code to give a user to reset their password")
 
 							notice(nick)
 							notice(nick, "For additional information on a certain command or topic,")
@@ -1204,17 +1204,36 @@ try:
 								notice(nick, "\x02/msg %s\x0F\x02 HELP SET\x02 for command help." % sv_nick)
 
 						elif icompare(command, "ALLOW"):
-							if len(line) > 4:
+							if users[nick].id == None:
+								notice(nick, "You are not identified.")
+
+							elif len(line) > 4:
 								if icompare(line[4], "ADD"):
 									if len(line) > 5:
 										if icompare(line[5], "HOST"):
 											notice(nick, "TODO")
+
 										elif icompare(line[5], "CERTFP"):
+											if users[nick].get_id_variable("certfp") is None:
+												notice(nick, "You are not using a client certificate.")
+												
 											if users[nick].certfp in users[nick].get_id_variable("certfp"):
 												notice(nick, "This fingerprint is already accepted.")
+
 											elif len(line) == 6:
 												users[nick].set_id_variable("certfp-append", users[nick].certfp)
 												notice(nick, "Fingerprint \x02%s\x0F added." % users[nick].certfp)
+
+								elif icompare(line[4], "LIST"):
+									if icompare(line[5], "HOST") or len(line) <= 5:
+										pass
+
+									if icompare(line[5], "CERTFP") or len(line) <= 5:
+										for item in users[nick].get_id_variable("certfp"):
+											notice(nick, "Certificate fingerprint \x02%s")
+
+									notice(nick, "\x02-= eof =-")
+
 							else:
 								notice(nick, "Unrecognised command for \x02ALLOW\x02. Accepted commands are")
 								notice(nick, "\x02ADD DEL LIST PLAIN\x02.")
@@ -1233,7 +1252,7 @@ try:
 										send_line(":%s JOIN :%s" % (sv_nick, line[4]))
 										send_line(":%s MODE %s +yr %s %s" % (sv_host, line[4], sv_nick, users[line[5]].get_id_variable("username")))
 										send_line(":%s INVITE %s %s" % (sv_nick, line[5], line[4]))
-										send_line(":%s NOTICE %s :I'm just stopping by to TRANSFER ownership of \x02%s\x0F from \x02%s\x0F to \x0F%s" % (sv_nick, line[4], line[4], nick, line[5]))
+										send_line(":%s NOTICE %s :I'm just stopping by to TRANSFER ownership of \x02%s\x0F from \x02%s\x0F to \x02%s" % (sv_nick, line[4], line[4], nick, line[5]))
 										send_line(":%s PART %s :See ya!" % (sv_nick, line[4]))
 							else:
 								notice(nick, "Insufficient parameters for \x02TRANSFER\x02. Please")
