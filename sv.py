@@ -153,7 +153,7 @@ class User ():
 	#	self.gecos = gecos
 
 	def set_id (self, id, send = True):
-		self.id = ids[id]
+		self.id = ids[id.lower()]
 		self.set_ident("^" + id)
 		if self.id.vhost != None:
 			self.toggle_vhost(True)
@@ -365,7 +365,7 @@ def load_db (file):
 
 			# this part of the code wins best eyesore award
 			if arg[0] == "ID" and len(arg) == 9:
-				ids[arg[1]] = ID(
+				ids[arg[1].lower()] = ID(
 				 username = arg[1],
 				 password_hash = (arg[2], arg[3]),
 				 is_admin = int(arg[4]),
@@ -375,17 +375,17 @@ def load_db (file):
 				 certfp = arg[7]
 				)
 			elif arg[0] == "ID" and len(arg) == 8:
-				ids[arg[1]] = ID(arg[1], (arg[2], arg[3]), int(arg[4]),
+				ids[arg[1].lower()] = ID(arg[1], (arg[2], arg[3]), int(arg[4]),
 				 False if arg[6] == "P" else True, None, int(arg[5]), arg[7])
 			elif arg[0] == "ID" and len(arg) == 7:
-				ids[arg[1]] = ID(arg[1], (arg[2], arg[3]), int(arg[4]),
+				ids[arg[1].lower()] = ID(arg[1], (arg[2], arg[3]), int(arg[4]),
 				 False if arg[6] == "P" else True, None, int(arg[5]), "")
 			elif arg[0] == "H" and len(arg) == 2:
 				vhosts.append(arg[1])
 			elif arg[0] == "HR" and len(arg) == 3:
 				vrequests[arg[1]] = arg[2]
 			elif arg[0] == "M" and len(arg) == 6:
-				ids[arg[1]].add_memo(Memo(arg[2], int(arg[3]), arg[4], bool(arg[5])))
+				ids[arg[1].lower()].add_memo(Memo(arg[2], int(arg[3]), arg[4], bool(arg[5])))
 			else:
 				debug_line("Line in <%s> cannot be parsed, skipped" % (file))
 
@@ -458,6 +458,7 @@ def check_password (input, salted_password):
 def logoff (reason, code = 0):
 	send_line(":%s QUIT :%s" % (sv_nick, reason))
 	save_db(db_file)
+	servers = {}
 	exit(code)
 
 
@@ -496,7 +497,7 @@ def time_str (t):
 
 load_db(db_file)
 if sv_id not in ids:
-	ids[sv_id] = ID(
+	ids[sv_id.lower()] = ID(
 	 username = sv_id,
 	 password_hash = (None, None),
 	 is_admin = 1,
@@ -674,7 +675,7 @@ try:
 					elif icompare(line[3], "certfp"):
 						users[nick].certfp = parameter
 						for id in ids:
-							if parameter in ids[id].certfp:
+							if parameter in ids[id.lower()].certfp:
 								users[nick].set_id(id)
 								notice(nick, "Automatically identified via certfp.")
 
@@ -947,7 +948,7 @@ try:
 								if len(line) < 6:
 									notice(nick, "Syntax is \x02MEMO SEND username message")
 								elif line[5] in ids:
-									ids[line[5]].add_memo(Memo(nick, time.time(),
+									ids[line[5].lower()].add_memo(Memo(nick, time.time(),
 									 parse_msg(line[6:])))
 									notice(nick, "Memo sent.")
 								else:
@@ -1012,7 +1013,7 @@ try:
 							elif icompare(line[4], "GIVE"):
 								if users[nick].get_id_variable("permissions") > 0:
 									if line[5] in ids:
-										ids[line[5]].vhost = line[6]
+										ids[line[5].lower()].vhost = line[6]
 										notice(nick, "vhost \x02%s\x0F activated for \x02%s" % (line[6], line[5]))
 									else:
 										notice(nick, "\x02%s\x0F is not registered!" % line[5])
@@ -1085,9 +1086,9 @@ try:
 							elif icompare(line[4], "ACCEPT"):
 								if users[nick].get_id_variable("permissions") > 0:
 									if line[5] in vrequests:
-										ids[line[5]].vhost = vrequests[line[5]]
+										ids[line[5].lower()].vhost = vrequests[line[5]]
 										notice(nick, "vhost request accepted.")
-										ids[line[5]].add_memo(Memo(nick, time.time(),
+										ids[line[5].lower()].add_memo(Memo(nick, time.time(),
 										 "Your vhost of \x02%s\x0F was accepted, and will take effect immediately." % vrequests[line[5]]))
 										del vrequests[line[5]]
 									else:
@@ -1131,12 +1132,12 @@ try:
 
 						elif icompare(command, "REGISTER"):
 							if len(line) > 5:
-								if line[4] == admin_user and line[5] != admin_pass:
+								if icompare(line[4], admin_user) and line[5] != admin_pass:
 									notice(nick, "Account \x02%s\x0F reserved." % line[4])
-								elif line[4] in ids:
+								elif line[4].lower() in ids:
 									notice(nick, "Account \x02%s\x0F already exists." % line[4])
 								else:
-									ids[line[4]] = ID(line[4],
+									ids[line[4].lower()] = ID(line[4],
 									 set_password(line[5]), admin_user == line[4])
 									users[nick].set_id(line[4])
 									notice(nick, "Account \x02%s\x0F created." % line[4])
@@ -1149,15 +1150,15 @@ try:
 						#elif icompare(command, ["IDENTIFY", "ID", "LOGIN"]) and len(line) > 5:
 						elif icompare(command, "LOGIN"):
 							if len(line) > 5:
-								if line[4] not in ids:
+								if line[4].lower() not in ids:
 									notice(nick, "Account \x02%s\x0F is not registered." % line[4])
 								elif users[nick].id != None:
 									notice(nick, "You are already identified for this username.")
-								elif check_password(line[5], ids[line[4]].password):
+								elif check_password(line[5], ids[line[4].lower()].password):
 									users[nick].set_id(line[4])
 									notice(nick, "Identified.")
-									if ids[line[4]].memos_unread:
-										notice(nick, "You have \x02%d\x0F unread memo%s." % (ids[line[4]].count_unread(), "" if ids[line[4]].count_unread() == 1 else "s"))
+									if ids[line[4].lower()].memos_unread:
+										notice(nick, "You have \x02%d\x0F unread memo%s." % (ids[line[4].lower()].count_unread(), "" if ids[line[4].lower()].count_unread() == 1 else "s"))
 								else:
 									notice(nick, "Incorrect password.")
 							else:
@@ -1298,11 +1299,11 @@ except SyntaxError:
 	err_line("\x1B[1mSyntaxError in %s, %d:\x1B[0m %s" % (filename, lineno, e))
 	logoff("Syntax error (bug)", 100)
 
-#except BaseException:
-#	type, e, tb = sys.exc_info()
-#	filename = tb.tb_frame.f_code.co_filename
-#	lineno = tb.tb_lineno
-#	print "%s error in %s, %d: %s" % (type, filename, lineno, e)
-#	err_line("\x1B[1m%s error in %s, %d:\x1B[0m %s" %
-#	 (type, filename, lineno, e))
-#	logoff("Uncaught exception (bug)", 100)
+except BaseException:
+	type, e, tb = sys.exc_info()
+	filename = tb.tb_frame.f_code.co_filename
+	lineno = tb.tb_lineno
+	print "%s error in %s, %d: %s" % (type, filename, lineno, e)
+	err_line("\x1B[1m%s error in %s, %d:\x1B[0m %s" %
+	 (type, filename, lineno, e))
+	logoff("Uncaught exception (bug)", 100)
