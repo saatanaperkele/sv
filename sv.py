@@ -124,7 +124,7 @@ class User ():
 		debug_line("User %s created on %s" % (nick, server))
 
 	def toggle_vhost (self, switch):
-		if switch and self.get_id_variable("vhost") != None and self.nick in users:
+		if switch and self.get_id_variable("vhost") is not None and self.nick in users:
 			debug_line("%s now has vhost %s" % (self.nick,
 			 self.get_id_variable("vhost")))
 			send_line(":%s METADATA %s cloakhost :%s" %
@@ -135,7 +135,7 @@ class User ():
 			debug_line("cloakhost: %s, host: %s" % (self.cloakhost, self.host))
 			send_line(":%s METADATA %s cloakhost :%s" %
 			 (sv_host, self.nick,
-			  self.cloakhost if self.cloakhost != None else self.host))
+			  self.cloakhost if self.cloakhost is not None else self.host))
 
 	def set_cloakhost (self, host, send = True):
 		debug_line("%s now has cloakhost %s" % (nick, host))
@@ -155,7 +155,7 @@ class User ():
 	def set_id (self, id, send = True):
 		self.id = ids[id.lower()]
 		self.set_ident("^" + id)
-		if self.id.vhost != None:
+		if self.id.vhost is not None:
 			self.toggle_vhost(True)
 		if send:
 			send_line(":%s METADATA %s accountname :%s" %
@@ -163,7 +163,7 @@ class User ():
 		return id
 
 	def get_id_variable (self, variable):
-		if self.id == None: return None
+		if self.id is None: return None
 
 		if variable == "username": return self.id.username.lower()
 		if variable == "permissions": return self.id.permissions
@@ -173,7 +173,7 @@ class User ():
 		raise SyntaxError("get_id_variable() used incorrectly, variable %s does not exist" % variable)
 
 	def set_id_variable (self, variable, value):
-		assert self.id != None
+		assert self.id is not None
 
 		if variable == "username": self.id.username = value
 		elif variable == "permissions": self.id.permissions = value
@@ -406,7 +406,7 @@ def save_db (file):
 				 id.password[0], id.password[1], id.permissions,
 				 id.memos_unread, "N" if id.notice else "P",
 				 ",".join(id.certfp),
-				 " " + id.vhost if id.vhost != None else ""))
+				 " " + id.vhost if id.vhost is not None else ""))
 				for memo in id.memos:
 					fh.write("M %s %s %d %s %i\n" % (id.username, memo.sender,
 					 memo.sent, memo.message, memo.read))
@@ -1035,7 +1035,7 @@ try:
 									notice(nick, "to request one not on the list.")
 
 							elif icompare(line[4], "OFF"):
-								if users[nick].id != None:
+								if users[nick].id is not None:
 									users[nick].toggle_vhost(False)
 									notice(nick, "Normal hostname restored.")
 								else:
@@ -1069,14 +1069,14 @@ try:
 									notice(nick, "Permission denied.")
 
 							elif icompare(line[4], "ON"):
-								if users[nick].id != None:
+								if users[nick].id is not None:
 									users[nick].toggle_vhost(True)
 									notice(nick, "You are now using vhost \x02%s" % users[nick].get_id_variable("vhost"))
 								else:
 									notice(nick, "You are not identified.")
 
 							elif icompare(line[4], "REQUEST"):
-								if users[nick].id != None:
+								if users[nick].id is not None:
 									vrequests[users[nick].get_id_variable("username")] = line[5]
 									send_line(":%s NOTICE %s :vhost \x02%s\x0F requested by \x02%s\x0F (\x02%s\x0F)" % (sv_nick, log_channel, line[5], nick, users[nick].get_id_variable("username")))
 									notice(nick, "vhost requested.")
@@ -1097,7 +1097,7 @@ try:
 									notice(nick, "Permission denied.")
 
 							elif icompare(line[4], "TAKE"):
-								if users[nick].id == None:
+								if users[nick].id is None:
 									notice(nick, "You are not identified.")
 								elif line[5].isdigit():
 									i = int(line[5])
@@ -1124,7 +1124,7 @@ try:
 								notice(nick, "Please \x02/msg %s\x0F\x02 HELP HOST\x02 for command help." % sv_nick)
 
 						elif icompare(command, "LOGOUT"):
-							if users[nick].id == None:
+							if users[nick].id is None:
 								notice(nick, "You are not identified.")
 							else:
 								users[nick].logout()
@@ -1152,7 +1152,7 @@ try:
 							if len(line) > 5:
 								if line[4].lower() not in ids:
 									notice(nick, "Account \x02%s\x0F is not registered." % line[4])
-								elif users[nick].id != None:
+								elif users[nick].id is not None:
 									notice(nick, "You are already identified for this username.")
 								elif check_password(line[5], ids[line[4].lower()].password):
 									users[nick].set_id(line[4])
@@ -1205,7 +1205,7 @@ try:
 								notice(nick, "\x02/msg %s\x0F\x02 HELP SET\x02 for command help." % sv_nick)
 
 						elif icompare(command, "ALLOW"):
-							if users[nick].id == None:
+							if users[nick].id is None:
 								notice(nick, "You are not identified.")
 
 							elif len(line) > 4:
