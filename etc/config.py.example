@@ -2,10 +2,10 @@ if __name__ == '__main__':
 	print "Start sv.py, not this!"
 	exit(1)
 
-from submodule import check_output
+import subprocess
 try:
-	sv_version = submodule.check_output(["git", "describe"]).split("\n")[0]
-except CalledProcessError:
+	sv_version = subprocess.check_output(["git", "describe"]).split("\n")[0]
+except subprocess.CalledProcessError:
 	sv_version = "v?.?"
 
 # edit below here
