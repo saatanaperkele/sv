@@ -119,6 +119,7 @@ class User ():
 		self.host = host
 		self.server = server
 		self.channels = {}
+		self.mode = ""
 		self.id = None
 		self.cloakhost = None
 		debug_line("User %s created on %s" % (nick, server))
@@ -192,6 +193,29 @@ class User ():
 		assert channel.name in self.channels
 		del self.channels[channel.name]
 
+	def change_mode (self, modes):
+		add = False
+		modelist = set(self.mode)
+
+		for i in modes:
+			if i == "+":
+				add = True
+
+			elif i == "-":
+				add = False
+
+			elif i in "yqaohvVbeI":
+				continue
+
+			elif add and i not in modelist:
+				modelist.add(i)
+
+			elif not add and i in modelist:
+				modelist.discard(i)
+
+		self.mode = "".join(modelist)
+		debug_prnt("User %s has modes %s" % (self.nick, self.mode))
+
 	def logout (self):
 		self.id = None
 		self.toggle_vhost(False)
@@ -235,6 +259,29 @@ class Channel ():
 			 self.name))
 			return 0
 		return 1
+
+	def change_mode (self, modes):
+		add = False
+		modelist = set(self.mode)
+
+		for i in modes:
+			if i == "+":
+				add = True
+
+			elif i == "-":
+				add = False
+
+			elif i in "yqaohvVbeI":
+				continue
+
+			elif add and i not in modelist:
+				modelist.add(i)
+
+			elif not add and i in modelist:
+				modelist.discard(i)
+
+		self.mode = "".join(modelist)
+		debug_prnt("Channel %s has modes %s" % (self.name, self.mode))
 
 	def __del__ (self):
 		debug_line("Channel %s removed" % self.name)
@@ -458,7 +505,6 @@ def check_password (input, salted_password):
 def logoff (reason, code = 0):
 	send_line(":%s QUIT :%s" % (sv_nick, reason))
 	save_db(db_file)
-	servers = {}
 	exit(code)
 
 
@@ -569,14 +615,20 @@ try:
 					if not channel in channels:
 						channels[channel] = Channel(channel)
 					
-					channels[channel].mode = line[3].lstrip("+")
+					channels[channel].change_mode(line[3])
 
 				elif icompare(line[1], "MODE"):
 					target = line[2]
-					if len(line) == 5:
-						if line[3] == "+r":
+
+					if target[0] in "#!+.":
+						channels[target].change_mode(line[3])
+
+						if line[3] == "+r" and len(line) == 5:
 							channels[target].founder = line[4]
 							debug_line("Founder for %s is %s" % (target, line[4]))
+					elif target[0] != "&":
+						users[target].change_mode(line[3])
+
 
 				elif icompare(line[1], "PART"):
 					nick = parse_msg(line[0])
@@ -970,7 +1022,7 @@ try:
 									
 								elif icompare(line[5], "ALL"):
 									users[nick].id.memos = []
-									notice(nick, "Deleted \x02%d\x0F memos" % len(memos))
+									notice(nick, "Deleted \x02%d\x0F memos" % len(users[nick].id.memos))
 
 								elif re.match(r"[0-9]+(?:[-,][0-9]+)*", line[5]) is not None:
 									for n in line[5].split(","):
@@ -990,7 +1042,6 @@ try:
 									notice(nick, "comma-delimited (1,3), or a combination (1-3,5,6-8).")
 									notice(nick, "It can also be \x02UNREAD\x02 or \x02ALL\x02.")
 
-								print prune
 								for i in prune:
 									del users[nick].id.memos[i]
 
@@ -1132,13 +1183,14 @@ try:
 
 						elif icompare(command, "REGISTER"):
 							if len(line) > 5:
-								if icompare(line[4], admin_user) and line[5] != admin_pass:
-									notice(nick, "Account \x02%s\x0F reserved." % line[4])
-								elif line[4].lower() in ids:
+								if line[4].lower() in ids:
 									notice(nick, "Account \x02%s\x0F already exists." % line[4])
 								else:
-									ids[line[4].lower()] = ID(line[4],
-									 set_password(line[5]), admin_user == line[4])
+									ids[line[4].lower()] = ID(
+									 username = line[4],
+									 password_hash = set_password(line[5]),
+									 is_admin = int("o" in users[nick].mode)
+									)
 									users[nick].set_id(line[4])
 									notice(nick, "Account \x02%s\x0F created." % line[4])
 									send_line(":%s NOTICE %s :account registered by \x02%s\x0F (\x02%s\x0F)" % (sv_nick, log_channel, nick, line[4]))
