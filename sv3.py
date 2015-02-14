@@ -46,19 +46,19 @@ verbosity, logfile, daemonize, varfile = 0, None, True, False
 try:
 	options, args = getopt(sys.argv[1:], "dhl:n")
 except GetoptError as e:
-	print e
+	print(e)
 	sys.exit(2)
 
 for option, arg in options:
 	if option == "-d":
 		verbosity = 1
 	if option == "-h":
-		print "sv IRC services\n"
-		print "%s -d -h -l logfile -n\n" % sys.argv[0]
-		print "-d\tdebug to stdout"
-		print "-h\tthis help"
-		print "-l\tdebug to logfile"
-		print "-n\tdon't start as daemon"
+		print("sv IRC services\n")
+		print("%s -d -h -l logfile -n\n" % sys.argv[0])
+		print("-d\tdebug to stdout")
+		print("-h\tthis help")
+		print("-l\tdebug to logfile")
+		print("-n\tdon't start as daemon")
 		sys.exit(0)
 	if option == "-l":
 		logfile = arg
