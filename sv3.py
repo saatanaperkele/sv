@@ -1338,7 +1338,7 @@ except AssertionError:
 	type, e, tb = sys.exc_info()
 	filename = tb.tb_frame.f_code.co_filename
 	lineno = tb.tb_lineno
-	print "AssertionError in %s, %d: %s" % (filename, lineno, e)
+	print("AssertionError in %s, %d: %s" % (filename, lineno, e))
 	err_line("\x1B[1mAssertionError in %s, %d:\x1B[0m %s" %
 	 (filename, lineno, e))
 	logoff("Assertion error (bug)", 100)
@@ -1347,7 +1347,7 @@ except SyntaxError:
 	type, e, tb = sys.exc_info()
 	filename = tb.tb_frame.f_code.co_filename
 	lineno = tb.tb_lineno
-	print "SyntaxError in %s, %d: %s" % (filename, lineno, e)
+	print("SyntaxError in %s, %d: %s" % (filename, lineno, e))
 	err_line("\x1B[1mSyntaxError in %s, %d:\x1B[0m %s" % (filename, lineno, e))
 	logoff("Syntax error (bug)", 100)
 
@@ -1355,7 +1355,7 @@ except BaseException:
 	type, e, tb = sys.exc_info()
 	filename = tb.tb_frame.f_code.co_filename
 	lineno = tb.tb_lineno
-	print "%s error in %s, %d: %s" % (type, filename, lineno, e)
+	print("%s error in %s, %d: %s" % (type, filename, lineno, e))
 	err_line("\x1B[1m%s error in %s, %d:\x1B[0m %s" %
 	 (type, filename, lineno, e))
 	logoff("Uncaught exception (bug)", 100)
