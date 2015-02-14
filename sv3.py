@@ -396,9 +396,9 @@ def variable_cloak (user):
 
 def debug_prnt (line):
 	if verbosity >= 1:
-		print "%.1f %s" % (round(time.time(), 1), line)
+		print("%.1f %s" % (round(time.time(), 1), line))
 
-	if logfile:
+	if logfile:   #nigger why would you do it this way
 		print >> file(logfile, "a"), "%.1f %s" % (round(time.time(), 1), line)
 
 
