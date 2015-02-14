@@ -1,4 +1,4 @@
-sv3 - dumb IRC services (now with more python3!)
+sv3 - dumb IRC services (now with more python3!!)
 
 This IRC psuedoserver supplies only one bot (unlike Services for IRC Networks,
 Atheme, and Anope which all supply a suite of *Servs) which handles username
